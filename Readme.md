@@ -88,18 +88,15 @@ report folder all make good ones.)*
 - Administrator privileges (EZfix needs these to inspect disks, services, and the
   registry, and will prompt Windows' standard elevation dialog for them)
 
-## Getting started
+## Quick Start
 
-### Just want to run it? (no PowerShell experience needed)
+1. Go to Releases and download the latest EZfix ZIP.
+2. Extract the ZIP.
+3. Double-click Launch-EZfix.bat.
+4. Approve the Windows administrator prompt.
+5. EZfix will check its prerequisites and open the troubleshooting interface.
 
-1. Click the green **Code** button on this repository, then **Download ZIP**.
-2. Extract the ZIP somewhere convenient (right-click it → **Extract All**).
-3. Open the extracted folder and double-click **`Launch-EZfix.bat`**.
-4. Windows will show one or two security prompts the first time - see
-   **Windows security warnings** below, this is expected.
-5. The EZfix control panel opens. Click a button.
-
-That's it - no need to open PowerShell, type any commands, or install anything by hand.
+No PowerShell experience required.
 
 #### Windows security warnings
 
