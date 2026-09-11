@@ -45,6 +45,10 @@ function Start-EZfixOfflineAnalysis {
         return
     }
 
+    $targetDiskNumber = (Get-Partition -DriveLetter $DriveLetter -ErrorAction Stop).DiskNumber
+    $liveDiskNumber = (Get-Partition -DriveLetter $env:SystemDrive.TrimEnd(':') -ErrorAction Stop).DiskNumber
+    if ($null -eq $targetDiskNumber -or $null -eq $liveDiskNumber) { throw 'Cannot identify the target and live system disks safely.' }
+    if ($targetDiskNumber -eq $liveDiskNumber) { throw 'Offline Analysis cannot target the running Windows disk. Select a secondary disk.' }
     $reportFolder = New-EZfixReportFolder
 
     Write-Host "=== EZFIX OFFLINE DISK ANALYSIS ===" -ForegroundColor Cyan
@@ -78,7 +82,7 @@ function Start-EZfixOfflineAnalysis {
     # Blindly assuming ControlSet001 can read old or wrong configuration.
     Write-Host "--- 2. Computer name (offline registry - SYSTEM hive) ---" -ForegroundColor Yellow
 
-    $hiveName = 'EZfixTempHive'
+    $hiveName = 'EZfixTempHive_' + [guid]::NewGuid().ToString('N')
     $systemHivePath = Join-Path $windowsPath 'System32\config\SYSTEM'
     $hiveLoaded = $false
 
@@ -87,7 +91,18 @@ function Start-EZfixOfflineAnalysis {
     }
     else {
         try {
-            $loadResult = & reg.exe load "HKLM\$hiveName" "$systemHivePath" 2>&1
+            $copyFolder=Join-Path $reportFolder 'registry-working-copy'
+            New-Item -Path $copyFolder -ItemType Directory -Force | Out-Null
+            foreach ($name in @('SYSTEM','SYSTEM.LOG1','SYSTEM.LOG2')) {
+                $source=Join-Path (Split-Path $systemHivePath) $name
+                if (Test-Path -LiteralPath $source) {
+                    $destination=Join-Path $copyFolder $name
+                    Copy-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
+                    (Get-Item -LiteralPath $destination).IsReadOnly=$false
+                }
+            }
+            $localHive=Join-Path $copyFolder 'SYSTEM'
+            $loadResult = & reg.exe load "HKLM\$hiveName" "$localHive" 2>&1
             if ($LASTEXITCODE -ne 0) {
                 throw "reg.exe load failed: $loadResult"
             }
@@ -103,7 +118,7 @@ function Start-EZfixOfflineAnalysis {
         }
         catch {
             Write-Host "Could not read the hive - $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "Normal if this disk is your own C: currently in use (the live system hive is exclusively locked - that's why this module is meant for genuinely offline disks)." -ForegroundColor DarkGray
+            Write-Host "The source was not loaded directly. A local working copy is used for registry inspection." -ForegroundColor DarkGray
         }
         finally {
             # CRITICAL: the hive must be unloaded no matter what, or it
@@ -148,7 +163,7 @@ function Start-EZfixOfflineAnalysis {
             Write-Host "OK: $($events.Count) Critical/Error events saved from $logFile" -ForegroundColor Green
         }
         catch {
-            if ($_.Exception.Message -match "No events were found") {
+            if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') {
                 Write-Host "No Critical/Error events in $logFile - a good sign." -ForegroundColor DarkGray
             }
             else {
@@ -177,7 +192,7 @@ function Start-EZfixOfflineAnalysis {
         Write-Host "Found BCD at $bcdPath (BIOS/MBR-style layout with a merged System Reserved partition)." -ForegroundColor Green
         try {
             $bcdOutput = & bcdedit /store $bcdPath /enum 2>&1
-            $bcdOutput | Out-File (Join-Path $reportFolder 'bcd-enum.txt')
+            if ($LASTEXITCODE -ne 0) { throw "bcdedit failed: $bcdOutput" }; $bcdOutput | Out-File (Join-Path $reportFolder 'bcd-enum.txt')
             Write-Host "OK: boot configuration exported to bcd-enum.txt" -ForegroundColor Green
             $bcdFound = $true
         }
@@ -238,7 +253,7 @@ function Start-EZfixOfflineAnalysis {
                             if (Test-Path $efiBcdPath) {
                                 Write-Host "Found BCD at $efiBcdPath (UEFI layout, EFI System Partition temporarily mounted as $($efiLetter):)." -ForegroundColor Green
                                 $bcdOutput = & bcdedit /store $efiBcdPath /enum 2>&1
-                                $bcdOutput | Out-File (Join-Path $reportFolder 'bcd-enum.txt')
+                                if ($LASTEXITCODE -ne 0) { throw "bcdedit failed: $bcdOutput" }; $bcdOutput | Out-File (Join-Path $reportFolder 'bcd-enum.txt')
                                 Write-Host "OK: boot configuration exported to bcd-enum.txt" -ForegroundColor Green
                             }
                             else {
@@ -277,3 +292,4 @@ function Start-EZfixOfflineAnalysis {
     Before this: the data disk must be ONLINE (Disk-Selector.ps1) and
     have a drive letter assigned.
 #>
+

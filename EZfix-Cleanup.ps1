@@ -30,51 +30,63 @@ function Start-EZfixCleanup {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param()
 
-    Write-Host "=== EZFIX LIMPIEZA ===" -ForegroundColor Cyan
-    Write-Host "Equipo: $([System.Net.Dns]::GetHostName())"
-    Write-Host "Fecha:  $(Get-Date)"
+    Write-Host "=== EZFIX CLEANUP ===" -ForegroundColor Cyan
+    Write-Host "Computer: $([System.Net.Dns]::GetHostName())"
+    Write-Host "Date:  $(Get-Date)"
     Write-Host ""
 
     $targets = @()
     if ($IsWindows) {
-        $targets += [pscustomobject]@{ Name = 'Temp de usuario'; Path = $env:TEMP }
-        $targets += [pscustomobject]@{ Name = 'Temp del sistema'; Path = (Join-Path $env:WINDIR 'Temp') }
+        $targets += [pscustomobject]@{ Name = 'User temporary files'; Path = $env:TEMP }
+        $targets += [pscustomobject]@{ Name = 'System temporary files'; Path = (Join-Path $env:WINDIR 'Temp') }
     }
     else {
-        $targets += [pscustomobject]@{ Name = 'Temp del sistema (/tmp)'; Path = '/tmp' }
+        $targets += [pscustomobject]@{ Name = 'System temporary files (/tmp)'; Path = '/tmp' }
     }
 
+    $cutoff = (Get-Date).AddDays(-7)
+    $moduleRoots = @(Get-Module | Where-Object ModuleBase | ForEach-Object { $_.ModuleBase.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar })
     $totalFreedMB = 0
 
     foreach ($target in $targets) {
         Write-Host "--- $($target.Name): $($target.Path) ---" -ForegroundColor Yellow
 
         if (-not (Test-Path $target.Path)) {
-            Write-Host "No existe esta ruta en este equipo." -ForegroundColor DarkGray
+            Write-Host "This path does not exist on this computer." -ForegroundColor DarkGray
             Write-Host ""
             continue
         }
 
-        $files = Get-ChildItem -Path $target.Path -File -Recurse -Force -ErrorAction SilentlyContinue
+        $files = @(Get-ChildItem -LiteralPath $target.Path -File -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {
+            $_.LastWriteTime -lt $cutoff -and $_.CreationTime -lt $cutoff -and
+            $_.FullName -notmatch '(?i)[\\/](remoteIpMoProxy|tmp_[^\\/]*|EZfix[^\\/]*)([\\/]|$)' -and
+            $_.Extension -notin '.ps1xml','.psm1','.psd1','.ps1' -and
+            -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)
+        })
         $count = $files.Count
         $sizeMB = if ($count -gt 0) { [math]::Round((($files | Measure-Object -Property Length -Sum).Sum) / 1MB, 1) } else { 0 }
 
         if ($count -eq 0) {
-            Write-Host "OK: ya esta limpio, nada que borrar." -ForegroundColor Green
+            Write-Host "No eligible old temporary files. Recent files and PowerShell runtime files are preserved." -ForegroundColor Green
             Write-Host ""
             continue
         }
 
-        Write-Host "$count archivos, $sizeMB MB"
+        Write-Host "$count files, $sizeMB MB"
 
-        if ($PSCmdlet.ShouldProcess("$($target.Name) ($count archivos, $sizeMB MB)", "Eliminar archivos temporales")) {
+        if ($PSCmdlet.ShouldProcess("$($target.Name) ($count files, $sizeMB MB)", "Delete temporary files")) {
             $deleted = 0
             $deletedBytes = 0
             $locked = 0
             foreach ($file in $files) {
+                $activeModuleFile = $false
+                foreach ($moduleRoot in $moduleRoots) {
+                    if ($file.FullName.StartsWith($moduleRoot,[StringComparison]::OrdinalIgnoreCase)) { $activeModuleFile=$true; break }
+                }
+                if ($activeModuleFile) { continue }
                 try {
                     $fileSize = $file.Length
-                    Remove-Item -Path $file.FullName -Force -ErrorAction Stop
+                    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop
                     $deleted++
                     $deletedBytes += $fileSize
                 }
@@ -84,32 +96,32 @@ function Start-EZfixCleanup {
             }
             $deletedMB = [math]::Round($deletedBytes / 1MB, 1)
             $totalFreedMB += $deletedMB
-            Write-Host "Borrados: $deleted archivos ($deletedMB MB liberados)." -ForegroundColor Green
+            Write-Host "Deleted: $deleted files ($deletedMB MB freed)." -ForegroundColor Green
             if ($locked -gt 0) {
-                Write-Host "$locked archivo(s) no se pudieron borrar (en uso o sin permiso) - normal, se omiten." -ForegroundColor DarkGray
+                Write-Host "$locked file(s) could not be deleted (in use or access denied) - skipped." -ForegroundColor DarkGray
             }
         }
         Write-Host ""
     }
 
-    # Papelera de reciclaje - solo Windows. No calculamos el tamano antes
+    # Recycle Bin - solo Windows. No calculamos el tamano antes
     # (leer el contenido de la papelera de forma confiable es mas trabajo
     # del que vale la pena para este modulo) - se reporta solo que se vacio.
     if ($IsWindows) {
-        Write-Host "--- Papelera de reciclaje ---" -ForegroundColor Yellow
-        if ($PSCmdlet.ShouldProcess("Papelera de reciclaje", "Vaciar")) {
+        Write-Host "--- Recycle Bin ---" -ForegroundColor Yellow
+        if ($PSCmdlet.ShouldProcess("Recycle Bin", "Empty")) {
             try {
                 Clear-RecycleBin -Force -ErrorAction Stop
-                Write-Host "OK: papelera vaciada." -ForegroundColor Green
+                Write-Host "OK: Recycle Bin emptied." -ForegroundColor Green
             }
             catch {
-                Write-Host "No se pudo vaciar la papelera - $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "Could not empty the Recycle Bin - $($_.Exception.Message)" -ForegroundColor Red
             }
         }
         Write-Host ""
     }
 
-    Write-Host "=== FIN DE LA LIMPIEZA - $totalFreedMB MB liberados en total (temporales) ===" -ForegroundColor Cyan
+    Write-Host "=== END OF CLEANUP - $totalFreedMB MB freed from temporary files ===" -ForegroundColor Cyan
 }
 
 <#
@@ -122,3 +134,4 @@ function Start-EZfixCleanup {
         Start-EZfixCleanup
             Pregunta confirmacion (s/n) por carpeta, y si aceptas, borra.
 #>
+

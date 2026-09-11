@@ -34,12 +34,14 @@ function Get-OSDiskNumber {
     # (usually C:) lives on. We resolve this dynamically instead of
     # assuming "disk 0", because it isn't always disk 0.
     $systemDriveLetter = $env:SystemDrive.TrimEnd(':')
-    (Get-Partition -DriveLetter $systemDriveLetter).DiskNumber
+    $partition = Get-Partition -DriveLetter $systemDriveLetter -ErrorAction Stop
+    if ($null -eq $partition.DiskNumber) { throw 'Cannot identify the running Windows disk. No disk changes are allowed.' }
+    $partition.DiskNumber
 }
 
 function Show-DiskInventory {
     $osDiskNumber = Get-OSDiskNumber
-    $disks = Get-Disk | Sort-Object Number
+    $disks = Get-Disk -ErrorAction Stop | Sort-Object Number
 
     Write-Host "=== DETECTED DISKS ===" -ForegroundColor Cyan
     Write-Host ""
@@ -64,7 +66,7 @@ function Show-DiskInventory {
             Write-Host " ($driveLetters, system disk - not selectable)"
         }
         else {
-            $statusText = $disk.OperationalStatus.ToString().ToUpper()
+            $statusText = ($disk.OperationalStatus -join ', ').ToUpper()
             $statusColor = if ($disk.OperationalStatus -eq 'Online') { 'Green' } else { 'Red' }
             Write-Host $label -NoNewline
             Write-Host $statusText -ForegroundColor $statusColor -NoNewline
@@ -114,6 +116,7 @@ function Set-DataDiskState {
         return
     }
 
+    if ($disk.IsBoot -or $disk.IsSystem) { throw 'The host boot/system disk cannot be modified.' }
     $sizeGB = [math]::Round($disk.Size / 1GB, 1)
     $isOfflineTarget = ($TargetState -eq 'Offline')
 
@@ -123,7 +126,7 @@ function Set-DataDiskState {
     # first to see the message before running it for real.
     $target = "Disk $DiskNumber ($($disk.FriendlyName), $sizeGB GB)"
     if ($PSCmdlet.ShouldProcess($target, "Set to $TargetState")) {
-        Set-Disk -Number $DiskNumber -IsOffline:$isOfflineTarget
+        Set-Disk -Number $DiskNumber -IsOffline:$isOfflineTarget -ErrorAction Stop
         Write-Host "Disk $DiskNumber is now $($TargetState.ToUpper())." -ForegroundColor Green
     }
 }
@@ -140,3 +143,4 @@ function Set-DataDiskState {
     Set-DataDiskState -DiskNumber 1 -TargetState Offline
         Asks for confirmation (y/n) and, if you accept, takes the disk offline.
 #>
+

@@ -1,71 +1,6 @@
 <#
-    EZfix-CategoryScoping.ps1
-    Category-based evidence collection (modo Scoping, replaces the
-    original EZfix-Scoping.ps1 - same "read-only, evidence only" rule,
-    organized by domain instead of one generic bucket).
-
-    Why categories: a vague problem ("the app doesn't work", "the user
-    can't log in") wastes time if you start by reading every log there
-    is. A sysadmin triages by domain first - is this a network problem,
-    an auth problem, an app problem, an OS problem? - then only looks at
-    what that domain actually touches. This module mirrors that: you
-    pick ONE category and it collects exactly the data points relevant
-    to that domain, nothing else. "Other" is the catch-all for anything
-    that doesn't fit cleanly (this is what the old generic Scoping did).
-
-    Categories and what each one collects:
-      Network - IP config, active TCP connections, DNS cache, and
-                System log events from network-related providers
-                (Tcpip, Dhcp-Client, Dnsapi, NETLOGON).
-      Auth    - Security log logon failures (4625), account lockouts
-                (4740), recent successful logons (4624), local users,
-                and local Administrators group membership.
-      App     - Application log errors/warnings, application-crash
-                events specifically (Application Error, .NET Runtime),
-                and startup programs.
-      OS      - System log errors/warnings, OS version/uptime/install
-                date, installed hotfixes, disk free space, and a quick
-                CPU/memory snapshot.
-      Other   - System + Application errors/warnings, unfiltered - the
-                same behavior the original EZfix-Scoping.ps1 had.
-
-    Live machine vs. offline disk: every category works two ways -
-      - No -EvtxRoot: reads THIS machine's live named event logs
-        (Get-WinEvent -LogName ...). This is what the EZfix Quick Fixes
-        section in the GUI uses - "run this on my own PC".
-      - -EvtxRoot <path>: reads .evtx FILES from that path instead (e.g.
-        a mounted disk's D:\Windows\System32\winevt\Logs), the same
-        technique EZfix-OfflineAnalysis.ps1 uses for a disk that won't
-        boot. In this mode, data points that only make sense on a
-        running system (live TCP connections, local users, installed
-        hotfixes, CPU load right now) are skipped - you can't ask a
-        disconnected disk what its CPU usage is - only the event-log
-        data points run.
-      This isn't wired into the GUI yet (the GUI always calls it live,
-      for the current machine) - the parameter is there so the same
-      engine can later point at a disk in the Advanced section without
-      writing a second copy of all this collection logic.
-
-    Report folder structure (2026-09-11): categories collected within
-    24 hours of each other share one parent timestamped folder instead
-    of scattering across a new folder per click - so a multi-category
-    investigation (Network now, Auth twenty minutes later) lands
-    together:
-
-        Desktop\EZfix\scoping\<session timestamp>\
-            Network\NetworkConfig.csv, ActiveConnections.csv, ...
-            Auth\Security-logon-failures.csv, LocalUsers.csv, ...
-            OS\HotFixes.csv, OSInfo.csv, ...
-
-    Older than 24 hours since the last session folder -> a new one is
-    started, so old and new investigations don't get mixed together.
-
-    Still read-only, still evidence-only: this module changes nothing
-    on the machine it inspects. If a category finding calls for an
-    actual fix, that's the human research step this whole project has
-    always deferred to - EZfix collects, it does not diagnose-and-fix
-    beyond the safe/reversible actions already covered by the Quick
-    Fixes section.
+Category evidence collection for this PC or mounted Windows event logs.
+A daily parent groups runs; each collection gets a unique subfolder.
 #>
 
 #Requires -RunAsAdministrator
@@ -128,7 +63,7 @@ function Start-EZfixCategoryScoping {
     )
 
     $sessionFolder = Get-EZfixScopingSessionFolder
-    $categoryFolder = Join-Path $sessionFolder $Category
+    $categoryFolder = Join-Path (Join-Path $sessionFolder $Category) ((Get-Date -Format 'yyyyMMdd_HHmmss_fff') + '_' + [guid]::NewGuid().ToString('N').Substring(0,8))
     New-Item -Path $categoryFolder -ItemType Directory -Force | Out-Null
 
     $isLive = -not $EvtxRoot
@@ -178,7 +113,7 @@ function Start-EZfixCategoryScoping {
             Write-Host "OK: $($events.Count) event(s) from $LogName saved to $OutFileName" -ForegroundColor Green
         }
         catch {
-            if ($_.Exception.Message -match "No events were found") {
+            if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') {
                 Write-Host "No matching events in $LogName for this filter - good sign." -ForegroundColor DarkGray
             }
             else {
@@ -242,7 +177,7 @@ function Start-EZfixCategoryScoping {
                 Get-LocalUser | Select-Object Name, Enabled, LastLogon, PasswordLastSet
             }
             Save-EZfixData -Description "Local Administrators group membership" -OutFileName 'LocalAdmins.csv' -Collector {
-                Get-LocalGroupMember -Group "Administrators"
+                Get-LocalGroup -SID 'S-1-5-32-544' -ErrorAction Stop | Get-LocalGroupMember -ErrorAction Stop
             }
         }
 
@@ -311,3 +246,4 @@ function Start-EZfixCategoryScoping {
             offline disk's event logs instead (live-only data points,
             like local users, are skipped in this mode).
 #>
+

@@ -25,7 +25,7 @@ function New-EZfixReportFolder {
         files - so each run stays separate, without overwriting
         previous runs.
     #>
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss_fff") + '_' + [guid]::NewGuid().ToString('N').Substring(0,8)
     $basePath = Join-Path ([Environment]::GetFolderPath('Desktop')) "EZfix"
     $reportPath = Join-Path $basePath $timestamp
 

@@ -1,0 +1,17 @@
+EZfix v1.0.0
+
+1. Extract the ZIP to a permanent folder, such as Documents.
+2. Open the folder and double-click Launch-EZfix.bat.
+3. Approve the administrator prompt if you trust this download.
+4. If PowerShell 7 is missing, accept its installation and wait.
+
+An EZfix shortcut is created on your Desktop on first launch.
+Keep the application folder and all its files together.
+If you move it, open Launch-EZfix.bat again to update the shortcut.
+
+Start with System Overview. Open Last Report shows complete results.
+Reports are saved under Desktop/EZfix in separate folders.
+
+EZfix is portable; only PowerShell 7 needs installation if missing.
+See README.md for features, requirements, behavior and removal.
+Download: https://github.com/jpcr9/EZfix/releases/latest

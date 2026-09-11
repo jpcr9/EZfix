@@ -43,6 +43,18 @@ function Start-EZfixRDPCheck {
     Write-Host "Date:     $(Get-Date)"
     Write-Host ""
 
+    try {
+        $edition=(Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name EditionID -ErrorAction Stop).EditionID
+        Write-Host "Windows edition: $edition"
+        if($edition -like 'Core*'){Write-Host 'Windows Home does not provide the built-in incoming Remote Desktop host. Service and network checks below are still shown.'}
+    } catch {Write-Host 'Windows edition information unavailable.'}
+    $rdpPort=3389
+    try {
+        $settings=Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -ErrorAction Stop
+        if($settings.PortNumber -ge 1 -and $settings.PortNumber -le 65535){$rdpPort=[int]$settings.PortNumber}
+        $nla = if($null -eq $settings.UserAuthentication){'Not reported'}else{[string]($settings.UserAuthentication -eq 1)}
+        Write-Host "RDP port checked: $rdpPort | Network Level Authentication required: $nla"
+    } catch {Write-Host 'RDP settings unavailable; checking default port 3389.'}
     # 1. Remote Desktop service (TermService). If it's down, it's
     # restarted automatically - this is exactly the kind of safe,
     # reversible fix that DOES fall within EZfix's scope boundary
@@ -95,7 +107,7 @@ function Start-EZfixRDPCheck {
     # differently.
     Write-Host "--- 3. Windows Firewall ---" -ForegroundColor Yellow
 
-    $fwRules = Get-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+    $fwRules = Get-NetFirewallRule -Name "RemoteDesktop-*" -ErrorAction SilentlyContinue
     if (-not $fwRules) {
         Write-Host "No Remote Desktop Firewall rules were found on this computer." -ForegroundColor Red
     }
@@ -113,14 +125,14 @@ function Start-EZfixRDPCheck {
     # 4. Is the port actually listening - the final check, the one that
     # confirms whether the previous three actually translate into a
     # real available connection.
-    Write-Host "--- 4. Port 3389 (actually listening) ---" -ForegroundColor Yellow
+    Write-Host "--- 4. Port $rdpPort (actually listening) ---" -ForegroundColor Yellow
 
-    $listening = Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue
+    $listening = Get-NetTCPConnection -LocalPort $rdpPort -State Listen -ErrorAction SilentlyContinue
     if ($listening) {
-        Write-Host "OK: port 3389 is listening." -ForegroundColor Green
+        Write-Host "OK: port $rdpPort is listening." -ForegroundColor Green
     }
     else {
-        Write-Host "Port 3389 is NOT listening right now." -ForegroundColor Red
+        Write-Host "Port $rdpPort is NOT listening right now." -ForegroundColor Red
     }
     Write-Host ""
 
@@ -132,3 +144,5 @@ function Start-EZfixRDPCheck {
         . .\EZfix-RDP.ps1
         Start-EZfixRDPCheck
 #>
+
+

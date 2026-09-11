@@ -1,134 +1,68 @@
-![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
-![PowerShell](https://img.shields.io/badge/PowerShell-7%2B-5391FE)
-![License](https://img.shields.io/badge/license-MIT-green)
-
 # EZfix
 
-**EZfix** is a self-service troubleshooting and data-collection toolkit for Windows: a single graphical control panel that runs the everyday triage checks a support engineer performs many times a day, plus a safer, guided way to investigate a Windows machine that won't boot - all backed by plain PowerShell, with every action logged.
+**Windows diagnostics and evidence collection, in one graphical workspace.**
 
-It was built to reflect how a real support engineer actually works: check the obvious
-things fast, ask before doing anything risky, never guess when a system disk is on the
-line, and leave a clear record of what happened.
+## Download and run
 
-## Why this exists
+### [Download EZfix v1.0.0 for Windows](https://github.com/jpcr9/EZfix/releases/download/v1.0.0/EZfix-v1.0.0.zip)
 
-Most "IT toolkit" scripts fall into one of two traps: either they're a pile of
-one-off `.ps1` files a technician has to remember the right flags for, or they're a
-kitchen-sink "fix everything" tool that quietly changes things it shouldn't. EZfix takes
-a narrower, more deliberate approach:
+[Release notes and downloads](https://github.com/jpcr9/EZfix/releases/latest)
 
-- **Nothing runs without knowing what it does.** Every button maps to a specific,
-  documented check. There's no "Optimize My PC" black box.
-- **State-changing actions always ask first**, using PowerShell's own confirmation
-  pattern (`SupportsShouldProcess` / `-WhatIf` / `-Confirm`), surfaced as a plain
-  Windows dialog so a non-scripting user still sees exactly what's about to happen.
-- **A machine's live operating system disk can never be taken offline or have its boot
-  files touched**, even by accident, even if a bad disk number gets passed in. This rule
-  is enforced in code, not just described in a warning label.
-- **Everything is logged.** Every session writes a timestamped log to the Desktop, so
-  "what did I actually run 20 minutes ago" is always answerable.
+1. Download **EZfix-v1.0.0.zip** above.
+2. Right-click the ZIP, choose **Extract All**, and save the folder somewhere permanent, such as Documents.
+3. Open the extracted folder and double-click **Launch-EZfix.bat**.
+4. Approve the administrator prompt if you trust the download. If PowerShell 7 is missing, EZfix offers to install it from Microsoft.
 
-## When to use it
+**Next time, use the EZfix shortcut on your Desktop.** It is created automatically on first launch. No coding, editor or manual commands are needed.
 
-EZfix covers two different situations that come up constantly in support work:
+EZfix is portable: keep its files together and do not run it inside the ZIP. If you move the folder, run Launch-EZfix.bat again to update the shortcut. An unrelated shortcut named EZfix is preserved. Desktop restrictions may prevent shortcut creation; the launcher still works.
 
-**The computer in front of you is acting up.** Slow network, high CPU/disk usage,
-temp files piling up, Remote Desktop refusing connections, or a fresh machine that needs
-its prerequisites checked - the **Quick Fixes** section handles these in one click each,
-with the result immediately visible in the log and a pop-up confirmation.
+Choose the named EZfix ZIP from Releases. GitHub's Source code archives are for source inspection.
 
-**A machine won't boot, and you need to look at its disk without booting it.**
-Connect the failing drive as a secondary/data disk to a healthy Windows machine (internal
-SATA bay, USB dock/enclosure, or a VM's virtual disk), and use the **Advanced** section to
-safely bring it online, inspect its partitions, and read its logs, registry, and boot
-configuration - all read-only, with the drive that machine actually boots from
-permanently locked out of the disk list.
+## Tools
 
-## Features
+| Tool | Useful for |
+|---|---|
+| System Overview | Windows version, uptime, CPU, RAM, GPU, BIOS and drive capacity. |
+| Network | IP configuration, gateway, DNS and route checks; also clears DNS cache. |
+| Performance | CPU/RAM, disk capacity/activity, process CPU time and RAM ranking, page file use. |
+| Connectivity & Security | Network profiles, firewall, Defender, Secure Boot, TPM, listeners and RDP. |
+| Recent Errors | Up to 50 newest System/Application Critical/Error events over 24 hours. |
+| Cleanup | Confirmed removal of eligible temporary files older than seven days and emptying the Recycle Bin. |
+| Collect Evidence | Category-based exports for investigation outside EZfix. |
 
-**Quick Fixes** (always run against the current machine):
-- **Network** - IP configuration, gateway reachability, DNS resolution/flush, and a
-  route trace to the internet, cross-platform under PowerShell 7.
-- **Performance** - a quick CPU/memory/disk snapshot.
-- **Cleanup** - clears user and system temp files and empties the Recycle Bin, with an
-  explicit confirmation before anything is deleted.
-- **RDP** - checks the Remote Desktop service, firewall rule, and registry setting that
-  most commonly block incoming RDP connections.
-- **Setup** - checks (and can install) EZfix's own prerequisites: PowerShell 7, required
-  Windows modules, and networking tools.
-- **Evidence collection** - five focused categories (**Network / Auth / App / OS /
-  Other**) that each pull exactly the log entries and system data relevant to that kind
-  of problem, instead of one undifferentiated dump of every log on the system.
+The resizable window wraps lines and shows brief previews. **Open Last Report** opens the full output. Reports are saved under **Desktop/EZfix**, separately for each run.
 
-**Advanced - disk analysis** (for a disk connected as data, not the machine's own):
-- **Detect Disks** - lists every disk on the machine, auto-identifies which one is the
-  live system disk, and locks it out of selection.
-- **Online/Offline** - brings a disk online or takes it offline, with an explicit
-  confirmation dialog and an automatic drive-letter assignment once it's online.
-- **Partition breakdown** - shows every partition on the selected disk (type, size,
-  drive letter), since a disk can hold several partitions even though Online/Offline is
-  a whole-disk action.
-- **Offline Analysis** - a read-only report covering OS version/build, installed
-  updates, key services, and boot configuration (including modern UEFI/GPT disks, not
-  just legacy BIOS/MBR), read directly from the mounted drive.
-- The same category-based evidence collection above can also target this mounted disk's
-  event logs instead of the live machine's, via the **Target mounted disk** option.
+## Advanced: Secondary Disk Investigation
 
-## Screenshots
+Inspect disks and partitions, including the running Windows disk. The system disk is black and protected from online/offline changes. Data disk states are green for Online and red for Offline; changes require confirmation.
 
-*(Add a few screenshots here once you've run it - the main Quick Fixes panel, the
-expanded Advanced section with a disk detected, and a sample evidence-collection
-report folder all make good ones.)*
+Find VHD/VHDX files across accessible local drives or select a file. Open one image read-only. Virtual disk identities are blue, with green/red status. **Detach VHD/VHDX disconnects the virtual disk; the image file is not deleted.** Only images opened by the current session can be detached here.
 
-## Requirements
+VHD inspection requires no Hyper-V and does not start a virtual machine. Unmounted images appear in file search, rather than the attached disk list.
 
-- Windows 10/11
-- PowerShell 7 (pwsh) - if it isn't installed, `Launch-EZfix.bat` installs it
-  automatically
-- Administrator privileges (EZfix needs these to inspect disks, services, and the
-  registry, and will prompt Windows' standard elevation dialog for them)
+Offline analysis reads supported Windows version, registry, event logs and boot configuration from a secondary Windows disk. Category evidence can also target that disk.
 
-## Quick Start
+## Requirements and behavior
 
-1. Go to Releases and download the latest EZfix ZIP.
-2. Extract the ZIP.
-3. Double-click Launch-EZfix.bat.
-4. Approve the Windows administrator prompt.
-5. EZfix will check its prerequisites and open the troubleshooting interface.
+Windows 10/11 desktop, administrator access and PowerShell 7. Internet is needed for prerequisite downloads and external checks. Windows edition, missing components or organization policy can limit individual features.
 
-No PowerShell experience required.
+EZfix needs no installer. PowerShell 7 is a separate prerequisite installed only if you accept setup. The PowerShell window stays hidden; the initial BAT launch may flash briefly.
 
-#### Windows security warnings
+Network clears DNS without another confirmation. Connectivity & Security may start a stopped Remote Desktop service. Cleanup and disk state changes ask first. Offline analysis performs no repair, but is not forensic write-blocked acquisition: it uses a working registry copy and may temporarily assign an EFI drive letter.
 
-The first time you run `Launch-EZfix.bat`, Windows may show:
+Windows Home cannot host built-in Remote Desktop connections. GPU memory can be approximate or unavailable. Performance metrics are snapshots; cumulative CPU seconds are not current CPU percentage. Some checks pause the interface. Windows-generated messages retain the system language.
 
-- **"Windows protected your PC" (SmartScreen)** - this appears for any downloaded
-  script from a publisher Windows doesn't recognize yet, not because anything is
-  wrong. Click **More info**, then **Run anyway**.
-- **"Do you want to allow this app to make changes to your device?" (UAC)** - EZfix
-  needs Administrator rights to check services, disks, and the registry. Click **Yes**.
-  This may appear twice on a first run: once if PowerShell 7 needs to be installed, and
-  once for EZfix itself.
+## Reports, updates and removal
 
-### Running it from PowerShell directly (technical users)
+Reports and session logs are under Desktop/EZfix. A different administrator account uses its own Desktop for reports. Reports may contain names, addresses, paths and event details; review before sharing.
 
-```powershell
-# From the folder containing all the EZfix files, in PowerShell 7 (pwsh),
-# running as Administrator:
-. .\EZfix-Interface.ps1
-Start-EZfixInterface
-```
+Update: close EZfix, extract the new version into a new permanent folder, then open its launcher to update the shortcut. Remove: close EZfix and delete its application folder and shortcut. Reports and PowerShell 7 remain separate.
 
-Each module can also be dot-sourced and used on its own from the console - see the
-`USAGE` block at the bottom of each `.ps1` file.
+An incomplete result does not mean no problems were found. Review warnings and reports. If Windows blocks execution, verify the source and follow your administrator's policy. A warning is not proof of safety. Setup errors identify the installation log folder; Microsoft's PowerShell download is https://aka.ms/PSWindows.
 
-## Project structure
+## About
 
-| File                            | Purpose                                                         |
-|----------------------------------|------------------------------------------------------------------|
-| `Launch-EZfix.bat`               | Double-click entry point; installs PowerShell 7 if needed        |
-| `EZfix-Launcher.ps1`             | Elevates to Administrator, then opens the interface               |
-| `EZfix-Interface.ps1`            | The Windows Forms GUI - Quick Fixes + Advanced disk analysis      |
-| `EZfix-Common.ps1`               | Shared helpers (e.g. report folder creation)                      |
-| `Disk-Selector.ps1`              | Disk detection, online/offline state changes, safety lockout      |
-| `EZfix-OfflineAnalysis.ps1`      | Read-only analysis of
+A PowerShell and Windows Forms IT support project focused on practical triage, readable results and evidence collection. Source is included for inspection.
+
+MIT license. See [LICENSE](LICENSE).
