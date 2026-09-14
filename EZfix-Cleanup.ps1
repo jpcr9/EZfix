@@ -1,26 +1,27 @@
 <#
     EZfix-Cleanup.ps1
-    Modulo de limpieza de temporales/cache de EZfix (modo TS - rapido,
-    no persiste nada).
+    EZfix temp files/cache cleanup module (TS mode - fast, saves
+    nothing to disk).
 
-    Alcance a proposito: limpia SOLO temporales de usuario, temporales
-    del sistema, y (en Windows) la papelera de reciclaje - los lugares
-    "seguros" de limpiar sin riesgo real. "Liberar espacio de temporales"
-    ya estaba en la lista de arreglos automaticos permitidos desde que
-    se definio el limite de alcance del proyecto. No toca cache de
-    navegador, no toca cookies, no borra nada fuera de estas carpetas -
-    eso seria expandir el alcance sin que se haya decidido asi.
+    Deliberately scoped: cleans ONLY user temp, system temp, and (on
+    Windows) the Recycle Bin - the "safe" places to clean without real
+    risk. "Free up temp space" was already on the list of allowed
+    auto-fixes since the project's scope boundary was first defined.
+    It doesn't touch browser cache, doesn't touch cookies, doesn't
+    delete anything outside these folders - that would be expanding the
+    scope without that having been decided.
 
-    Usa el mismo patron de confirmacion que Disk-Selector.ps1
+    Uses the same confirmation pattern as Disk-Selector.ps1
     (SupportsShouldProcess + ConfirmImpact 'High'):
-      Start-EZfixCleanup -WhatIf   -> modo dry-run real: dice que borraria,
-                                       sin borrar nada.
-      Start-EZfixCleanup           -> pregunta Y/N antes de borrar,
-                                       una vez por carpeta (y otra vez
-                                       para la papelera).
+      Start-EZfixCleanup -WhatIf   -> real dry-run mode: reports what it
+                                       would delete, without deleting
+                                       anything.
+      Start-EZfixCleanup           -> asks Y/N before deleting, once
+                                       per folder (and again for the
+                                       Recycle Bin).
 #>
 
-# Mismo parche de compatibilidad que los demas modulos cross-platform.
+# Same compatibility patch as the other cross-platform modules.
 if (-not (Test-Path Variable:IsWindows)) {
     $IsWindows = $env:OS -eq 'Windows_NT'
     $IsLinux   = -not $IsWindows
@@ -104,9 +105,9 @@ function Start-EZfixCleanup {
         Write-Host ""
     }
 
-    # Recycle Bin - solo Windows. No calculamos el tamano antes
-    # (leer el contenido de la papelera de forma confiable es mas trabajo
-    # del que vale la pena para este modulo) - se reporta solo que se vacio.
+    # Recycle Bin - Windows only. We don't calculate its size beforehand
+    # (reliably reading the Recycle Bin's contents is more work than
+    # this module is worth) - it just reports that it was emptied.
     if ($IsWindows) {
         Write-Host "--- Recycle Bin ---" -ForegroundColor Yellow
         if ($PSCmdlet.ShouldProcess("Recycle Bin", "Empty")) {
@@ -125,13 +126,12 @@ function Start-EZfixCleanup {
 }
 
 <#
-    USO:
+    USAGE:
         . .\EZfix-Cleanup.ps1
 
         Start-EZfixCleanup -WhatIf
-            Modo dry-run: dice cuanto borraria, sin borrar nada.
+            Dry-run mode: reports how much it would delete, without deleting anything.
 
         Start-EZfixCleanup
-            Pregunta confirmacion (s/n) por carpeta, y si aceptas, borra.
+            Asks for confirmation (y/n) per folder, and deletes if you accept.
 #>
-
