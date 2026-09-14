@@ -1,28 +1,28 @@
 <#
     Network-Diagnostics.ps1
-    Modulo 1 del toolkit de diagnostico - Red (version multiplataforma)
+    Diagnostic toolkit module 1 - Network (cross-platform version)
 
-    Corre con PowerShell Core (pwsh), no con Windows PowerShell (powershell.exe).
-    pwsh es el mismo lenguaje en Windows y en Linux - por eso lo usamos como
-    motor comun en vez de tener un script distinto por sistema operativo.
+    Runs on PowerShell Core (pwsh), not Windows PowerShell (powershell.exe).
+    pwsh is the same language on Windows and on Linux - that's why it's
+    used as the common engine instead of having a separate script per OS.
 
-    POR QUE ESTA ARMADO ASI:
-    Troubleshooting de red va de la capa mas baja a la mas alta:
-      1. Tengo IP?           -> si no, el problema es DHCP/adaptador
-      2. Le pego al gateway? -> si no, el problema es local (cable, wifi, switch)
-      3. Resuelve DNS?       -> si el gateway responde pero esto no, el problema es DNS
-      4. Llego a internet?   -> si DNS funciona pero esto no, hay un corte en la ruta
+    WHY IT'S BUILT THIS WAY:
+    Network troubleshooting goes from the lowest layer to the highest:
+      1. Do I have an IP?       -> if not, the problem is DHCP/adapter
+      2. Can I reach the gateway? -> if not, the problem is local (cable, wifi, switch)
+      3. Does DNS resolve?      -> if the gateway responds but this doesn't, the problem is DNS
+      4. Do I reach the internet? -> if DNS works but this doesn't, there's a break further along the route
 
-    LA DIFERENCIA CLAVE ENTRE WINDOWS Y LINUX PARA UN SCRIPT COMO ESTE:
-    Windows tiene cmdlets nativos para casi todo (Get-NetIPConfiguration,
-    Resolve-DnsName, Clear-DnsClientCache) - pero esos cmdlets NO EXISTEN
-    en Linux, porque dependen de APIs de Windows por debajo.
-    En Linux no hay "el" comando - varia por distro (resolvectl en unas,
-    nscd en otras, ninguna cache de DNS en otras). La solucion no es tener
-    un cmdlet magico que funcione en los dos lados: es detectar en que
-    sistema estamos ($IsWindows / $IsLinux, variables automaticas de pwsh)
-    y usar la herramienta correcta en cada rama, o caer a algo universal
-    del .NET (como [System.Net.Dns]) cuando existe.
+    THE KEY DIFFERENCE BETWEEN WINDOWS AND LINUX FOR A SCRIPT LIKE THIS:
+    Windows has native cmdlets for almost everything (Get-NetIPConfiguration,
+    Resolve-DnsName, Clear-DnsClientCache) - but those cmdlets DO NOT EXIST
+    on Linux, because they depend on underlying Windows APIs.
+    On Linux there's no single "the" command - it varies by distro
+    (resolvectl on some, nscd on others, no DNS cache at all on others).
+    The fix isn't a magic cmdlet that works on both sides: it's detecting
+    which system we're on ($IsWindows / $IsLinux, pwsh's automatic
+    variables) and using the right tool on each branch, or falling back
+    to something universal from .NET (like [System.Net.Dns]) when it exists.
 #>
 
 Write-Host "=== NETWORK DIAGNOSTICS ===" -ForegroundColor Cyan
@@ -31,7 +31,7 @@ Write-Host "System:   $($PSVersionTable.OS)"
 Write-Host "Date:     $(Get-Date)"
 Write-Host ""
 
-# 1. Configuracion IP actual (capa 3 - direccionamiento)
+# 1. Current IP configuration (layer 3 - addressing)
 Write-Host "--- 1. IP configuration ---" -ForegroundColor Yellow
 
 $gateway = $null
@@ -41,8 +41,8 @@ if ($IsWindows) {
     $gateway = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway } | Select-Object -First 1).IPv4DefaultGateway.NextHop
 }
 else {
-    # Linux no tiene Get-NetIPConfiguration. Usamos los comandos nativos "ip",
-    # que existen en practicamente cualquier distro moderna.
+    # Linux doesn't have Get-NetIPConfiguration. We use the native "ip"
+    # command, which exists on practically every modern distro.
     ip -4 addr show | Select-String "inet " | ForEach-Object { Write-Host $_.Line.Trim() }
     $routeLine = (ip route show default | Select-Object -First 1)
     Write-Host $routeLine
@@ -52,12 +52,12 @@ else {
 }
 Write-Host ""
 
-# 2. Le pego al gateway? Si esto falla, el problema es local (cable, wifi, switch).
+# 2. Can I reach the gateway? If this fails, the problem is local (cable, wifi, switch).
 Write-Host "--- 2. Gateway ping ---" -ForegroundColor Yellow
 
 if ($gateway) {
-    # Ping nativo, no Test-Connection: el flag de conteo cambia entre sistemas
-    # (-n en Windows, -c en Linux/Mac), asi que lo resolvemos segun la plataforma.
+    # Native ping, not Test-Connection: the count flag differs between systems
+    # (-n on Windows, -c on Linux/Mac), so it's resolved based on the platform.
     $pingArgs = if ($IsWindows) { @("-n", "2", $gateway) } else { @("-c", "2", $gateway) }
     $pingOutput = & ping @pingArgs 2>&1
     $pingOutput | ForEach-Object { Write-Host $_ }
@@ -72,9 +72,10 @@ if ($gateway) {
 }
 Write-Host ""
 
-# 3. Resuelve DNS? Usamos .NET directo ([System.Net.Dns]) en vez de Resolve-DnsName
-#    porque Resolve-DnsName es un cmdlet de Windows que no existe en Linux.
-#    [System.Net.Dns] es parte del framework .NET, corre igual en los dos lados.
+# 3. Does DNS resolve? Uses .NET directly ([System.Net.Dns]) instead of
+#    Resolve-DnsName because Resolve-DnsName is a Windows cmdlet that
+#    doesn't exist on Linux. [System.Net.Dns] is part of the .NET
+#    framework, and runs the same on both sides.
 Write-Host "--- 3. DNS resolution ---" -ForegroundColor Yellow
 try {
     $addresses = [System.Net.Dns]::GetHostAddresses("www.google.com")
@@ -84,11 +85,11 @@ try {
 }
 Write-Host ""
 
-# 4. Flush de cache DNS - ESTE es el mejor ejemplo de por que no existe
-#    "un" comando universal. En Windows siempre hay cache de DNS a nivel
-#    de sistema. En Linux depende de que este corriendo la distro:
-#    systemd-resolved (comun en Ubuntu/Fedora recientes), nscd (mas viejo),
-#    o nada en absoluto (muchas distros minimas no cachean DNS).
+# 4. Flush the DNS cache - THIS is the best example of why there's no
+#    single universal command. Windows always has a system-level DNS
+#    cache. On Linux it depends on what the distro is running:
+#    systemd-resolved (common on recent Ubuntu/Fedora), nscd (older),
+#    or nothing at all (many minimal distros don't cache DNS).
 Write-Host "--- 4. Flush DNS cache ---" -ForegroundColor Yellow
 
 if ($IsWindows) {
@@ -107,8 +108,8 @@ else {
 }
 Write-Host ""
 
-# 5. Llega hasta internet? tracert (Windows) vs traceroute (Linux, a veces
-#    ni siquiera viene instalado por defecto - por eso lo chequeamos antes).
+# 5. Do I reach the internet? tracert (Windows) vs traceroute (Linux,
+#    sometimes not even installed by default - that's why it's checked first).
 Write-Host "--- 5. Internet route trace ---" -ForegroundColor Yellow
 
 if ($IsWindows) {
@@ -124,5 +125,3 @@ else {
 
 Write-Host ""
 Write-Host "=== END OF NETWORK DIAGNOSTICS ===" -ForegroundColor Cyan
-
-
