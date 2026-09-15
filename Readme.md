@@ -1,5 +1,7 @@
 # EZfix
 
+![CI](https://github.com/jpcr9/EZfix/actions/workflows/ci.yml/badge.svg)
+
 **Portable Windows toolkit for IT diagnostics, evidence collection and read-only VHD/VHDX inspection. Download, extract and launch.**
 
 ## Download and run
@@ -60,7 +62,7 @@ Reports and session logs are under Desktop/EZfix. A different administrator acco
 
 Update: close EZfix, extract the new version into a new permanent folder, then open its launcher to update the shortcut. Remove: close EZfix and delete its application folder and shortcut. Reports and PowerShell 7 remain separate.
 
-An incomplete result does not mean no problems were found. Review warnings and reports. If Windows blocks execution, verify the source and follow your administrator's policy. A warning is not proof of safety. Setup errors identify the installation log folder; Microsoft's PowerShell download is https://aka.ms/PSWindows.
+An incomplete result does not mean no problems were found. Review warnings and reports. If Windows blocks execution, verify the source and follow your administrator's policy - each [release](https://github.com/jpcr9/EZfix/releases) lists SHA256 checksums for its download files, so you can confirm a copy matches exactly what was published. A warning is not proof of safety. Setup errors identify the installation log folder; Microsoft's PowerShell download is https://aka.ms/PSWindows.
 
 ## About
 
