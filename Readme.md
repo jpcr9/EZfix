@@ -4,18 +4,16 @@
 
 ## Download and run
 
-**Get the current version (recommended):**
-
-1. On the [repository's main page](https://github.com/jpcr9/EZfix), click **Code → Download ZIP** (or `git pull` if you already have it cloned). This always matches the latest code on `main`.
+1. Go to the [EZfix repository](https://github.com/jpcr9/EZfix), click the green **Code** button, then **Download ZIP**. This always gives you the newest version.
 2. Right-click the ZIP, choose **Extract All**, and save the folder somewhere permanent, such as Documents.
 3. Open the extracted folder and double-click **Launch-EZfix.bat**.
 4. Approve the administrator prompt if you trust the download. If PowerShell 7 is missing, EZfix offers to install it from Microsoft.
 
-**Next time, use the EZfix shortcut on your Desktop.** It is created automatically on first launch. No coding, editor or manual commands are needed.
+**Next time, use the EZfix shortcut on your Desktop.** It is created automatically the first time you run EZfix - no coding, editor or manual commands needed.
 
-EZfix is portable: keep its files together and do not run it inside the ZIP. If you move the folder, run Launch-EZfix.bat again to update the shortcut. An unrelated shortcut named EZfix is preserved. Desktop restrictions may prevent shortcut creation; the launcher still works.
+EZfix is portable: keep its files together and don't run it from inside the ZIP. If you move the folder, run Launch-EZfix.bat again to refresh the shortcut. An unrelated shortcut named EZfix is preserved. Desktop restrictions may prevent shortcut creation; the launcher still works either way.
 
-**Prefer a fixed, tested build instead?** [Releases](https://github.com/jpcr9/EZfix/releases/latest) has versioned ZIPs that don't change once published - useful if you specifically want a known, unchanging snapshot rather than whatever is newest. Keep in mind a Release ZIP is frozen at the moment it was tagged, so it will lag behind `main` until a new version is cut; re-downloading the same Release link will keep giving you that same older build, not new commits.
+Looking for a previously tested version instead of the newest code? See [Releases](https://github.com/jpcr9/EZfix/releases/latest) - just note a Release is locked to whatever code existed when it was published, so it can be missing newer fixes.
 
 ## Tools
 
