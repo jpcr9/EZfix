@@ -1046,8 +1046,18 @@ function Start-EZfixInterface {
             }
         }
 
-        # Refresh the list so the displayed state is up to date.
+            # Refresh the list so the displayed state is up to date.
         $btnDetect.PerformClick()
+
+        # $btnApply itself still holds keyboard focus at this point,
+        # sitting well below the fold (Y 556) on a tab that Resize-
+        # EZfixAdvancedPanel just scrolled back to the top. A focused
+        # control that's now off-screen is exactly what WinForms tends
+        # to auto-scroll back into view the next time anything touches
+        # the layout - undoing that reset. Moving focus to $btnDetect
+        # (always near the top) closes that gap instead of just hoping
+        # the reset sticks.
+        $btnDetect.Focus()
     })
 
     $btnDiag.Add_Click({
