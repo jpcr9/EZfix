@@ -29,6 +29,66 @@
 #Requires -RunAsAdministrator
 #Requires -Modules Storage
 
+function Invoke-EZfixWithOfflineHive {
+    <#
+        Loads a copy of a registry hive file under a uniquely-named
+        temporary HKLM key, runs the given script block against it
+        (passed the loaded key's path, e.g. "HKLM:\EZfixTempHive_xxxx"),
+        and guarantees the hive gets unloaded afterward - even if the
+        script block throws.
+
+        Pulled out into its own function specifically so this one
+        load/read/unload cycle - the part where getting it wrong leaves a
+        hive locked on the analysis machine - can be tested in isolation,
+        instead of only ever being exercised by hand against a real disk.
+        If the script block throws, that exception is allowed to
+        propagate to the caller after unload still runs; this function's
+        only job is guaranteeing cleanup, not deciding how read errors
+        get handled.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$HiveFilePath,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$ScriptBlock
+    )
+
+    $hiveName = 'EZfixTempHive_' + [guid]::NewGuid().ToString('N')
+    $hiveLoaded = $false
+
+    try {
+        $loadResult = & reg.exe load "HKLM\$hiveName" "$HiveFilePath" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "reg.exe load failed: $loadResult"
+        }
+        $hiveLoaded = $true
+
+        & $ScriptBlock "HKLM:\$hiveName"
+    }
+    finally {
+        # CRITICAL: the hive must be unloaded no matter what, or it
+        # stays locked until this analysis machine is rebooted. .NET
+        # can leave the handle open even after the caller's script block
+        # is "done" reading - forcing garbage collection before
+        # unloading is the standard trick to avoid a "the process cannot
+        # access the file" error on reg unload.
+        if ($hiveLoaded) {
+            [System.GC]::Collect()
+            [System.GC]::WaitForPendingFinalizers()
+            Start-Sleep -Milliseconds 500
+            & reg.exe unload "HKLM\$hiveName" | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Hive unloaded successfully." -ForegroundColor DarkGray
+            }
+            else {
+                Write-Host "WARNING: could not cleanly unload the hive - it may stay locked until this analysis machine is rebooted." -ForegroundColor Red
+            }
+        }
+    }
+}
+
 function Start-EZfixOfflineAnalysis {
     [CmdletBinding()]
     param(
@@ -82,9 +142,7 @@ function Start-EZfixOfflineAnalysis {
     # Blindly assuming ControlSet001 can read old or wrong configuration.
     Write-Host "--- 2. Computer name (offline registry - SYSTEM hive) ---" -ForegroundColor Yellow
 
-    $hiveName = 'EZfixTempHive_' + [guid]::NewGuid().ToString('N')
     $systemHivePath = Join-Path $windowsPath 'System32\config\SYSTEM'
-    $hiveLoaded = $false
 
     if (-not (Test-Path $systemHivePath)) {
         Write-Host "The SYSTEM hive was not found at $systemHivePath" -ForegroundColor Red
@@ -102,43 +160,21 @@ function Start-EZfixOfflineAnalysis {
                 }
             }
             $localHive=Join-Path $copyFolder 'SYSTEM'
-            $loadResult = & reg.exe load "HKLM\$hiveName" "$localHive" 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                throw "reg.exe load failed: $loadResult"
+
+            Invoke-EZfixWithOfflineHive -HiveFilePath $localHive -ScriptBlock {
+                param($HiveRoot)
+                $currentControlSet = (Get-ItemProperty "$HiveRoot\Select" -Name Current).Current
+                $controlSetName = "ControlSet{0:D3}" -f $currentControlSet
+                $computerNamePath = "$HiveRoot\$controlSetName\Control\ComputerName\ComputerName"
+                $computerName = (Get-ItemProperty -Path $computerNamePath -Name ComputerName -ErrorAction Stop).ComputerName
+
+                Write-Host "OK: computer name = $computerName (using $controlSetName, the real active one)" -ForegroundColor Green
+                "Computer name (offline): $computerName" | Out-File (Join-Path $reportFolder 'offline-registry.txt')
             }
-            $hiveLoaded = $true
-
-            $currentControlSet = (Get-ItemProperty "HKLM:\$hiveName\Select" -Name Current).Current
-            $controlSetName = "ControlSet{0:D3}" -f $currentControlSet
-            $computerNamePath = "HKLM:\$hiveName\$controlSetName\Control\ComputerName\ComputerName"
-            $computerName = (Get-ItemProperty -Path $computerNamePath -Name ComputerName -ErrorAction Stop).ComputerName
-
-            Write-Host "OK: computer name = $computerName (using $controlSetName, the real active one)" -ForegroundColor Green
-            "Computer name (offline): $computerName" | Out-File (Join-Path $reportFolder 'offline-registry.txt')
         }
         catch {
             Write-Host "Could not read the hive - $($_.Exception.Message)" -ForegroundColor Red
             Write-Host "The source was not loaded directly. A local working copy is used for registry inspection." -ForegroundColor DarkGray
-        }
-        finally {
-            # CRITICAL: the hive must be unloaded no matter what, or it
-            # stays locked until this analysis machine is rebooted. .NET
-            # can leave the handle open even after you're "done" reading
-            # - forcing garbage collection before unloading is the
-            # standard trick to avoid a "the process cannot access the
-            # file" error on reg unload.
-            if ($hiveLoaded) {
-                [System.GC]::Collect()
-                [System.GC]::WaitForPendingFinalizers()
-                Start-Sleep -Milliseconds 500
-                & reg.exe unload "HKLM\$hiveName" | Out-Null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "Hive unloaded successfully." -ForegroundColor DarkGray
-                }
-                else {
-                    Write-Host "WARNING: could not cleanly unload the hive - it may stay locked until this analysis machine is rebooted." -ForegroundColor Red
-                }
-            }
         }
     }
     Write-Host ""
@@ -292,4 +328,3 @@ function Start-EZfixOfflineAnalysis {
     Before this: the data disk must be ONLINE (Disk-Selector.ps1) and
     have a drive letter assigned.
 #>
-
