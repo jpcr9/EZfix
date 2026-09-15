@@ -29,6 +29,7 @@ $ezfixDependencies = [ordered]@{
     'Start-EZfixRecentErrors'    = 'EZfix-SystemTools.ps1'
     'Get-EZfixSecondaryEventPath' = 'EZfix-SystemTools.ps1'
     'Start-EZfixCategoryScoping' = 'EZfix-CategoryScoping.ps1'
+    'Show-EZfixToolCard'         = 'EZfix-Toolbox.ps1'
 }
 
 foreach ($funcName in $ezfixDependencies.Keys) {
@@ -103,7 +104,7 @@ function Start-EZfixInterface {
     $gbQuick = New-Object System.Windows.Forms.GroupBox
     $gbQuick.Text = "This PC: Diagnostics && Tools"
     $gbQuick.Location = New-Object System.Drawing.Point(15, 10)
-    $gbQuick.Size = New-Object System.Drawing.Size(455, 150)
+    $gbQuick.Size = New-Object System.Drawing.Size(455, 184)
     $form.Controls.Add($gbQuick)
 
     function New-EZfixQuickButton {
@@ -145,6 +146,13 @@ function Start-EZfixInterface {
     $btnCollectEvidence = New-EZfixQuickButton -Text "Collect Evidence" -X 235 -Y 106 -Width 190
     $gbQuick.Controls.Add($btnCollectEvidence)
 
+    # Fourth row: the Toolbox - reuses the same category picked above,
+    # so there's no second dropdown to keep in sync. Not documentation -
+    # just enough per tool to open it and try something, with a link to
+    # its own official docs for anything deeper (see EZfix-Toolbox.ps1).
+    $btnToolbox = New-EZfixQuickButton -Text "Open Toolbox for Selected Category" -X 10 -Y 140 -Width 435
+    $gbQuick.Controls.Add($btnToolbox)
+
     # ============================================================
     # SECTION 2 - Advanced (collapsible disk analysis panel)
     # ============================================================
@@ -153,7 +161,7 @@ function Start-EZfixInterface {
     # expand/collapse control - click it to show or hide everything
     # below (Update-EZfixLayout does the actual show/hide + resize).
     $btnToggleAdvanced = New-Object System.Windows.Forms.Button
-    $btnToggleAdvanced.Location = New-Object System.Drawing.Point(15, 170)
+    $btnToggleAdvanced.Location = New-Object System.Drawing.Point(15, 204)
     $btnToggleAdvanced.Size = New-Object System.Drawing.Size(455, 28)
     $btnToggleAdvanced.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
     $btnToggleAdvanced.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
@@ -163,7 +171,7 @@ function Start-EZfixInterface {
     # showing/hiding it is a single $pnlAdvanced.Visible flip instead of
     # toggling five controls separately.
     $pnlAdvanced = New-Object System.Windows.Forms.Panel
-    $pnlAdvanced.Location = New-Object System.Drawing.Point(15, 204)
+    $pnlAdvanced.Location = New-Object System.Drawing.Point(15, 238)
     # Fixed height, regardless of how much content lives inside it -
     # AutoScroll shows an internal scrollbar once the disk list /
     # partitions / state / offline-analysis controls (which sit below,
@@ -349,12 +357,20 @@ function Start-EZfixInterface {
     # Log - shared by both sections, also written to the session log file.
     # Its Y position moves depending on whether Advanced is expanded -
     # Update-EZfixLayout (defined further below, called at the end)
-    # positions it and resizes the window.
+    # positions it and resizes the window. $btnToggleLog lets the Log
+    # box itself be collapsed independently of Advanced or of resizing
+    # the window - same idea as $btnToggleAdvanced, just for this box.
     # ============================================================
     $lblLog = New-Object System.Windows.Forms.Label
     $lblLog.Text = "Log:"
     $lblLog.Size = New-Object System.Drawing.Size(300, 20)
     $form.Controls.Add($lblLog)
+
+    $btnToggleLog = New-Object System.Windows.Forms.Button
+    $btnToggleLog.Text = 'Hide'
+    $btnToggleLog.Size = New-Object System.Drawing.Size(80, 20)
+    $btnToggleLog.Tag = $true
+    $form.Controls.Add($btnToggleLog)
 
     $txtLog = New-Object System.Windows.Forms.TextBox
     $txtLog.Size = New-Object System.Drawing.Size(455, 150)
@@ -391,6 +407,7 @@ function Start-EZfixInterface {
         $btnOverview.SetBounds((20 + $buttonWidth),65,$buttonWidth,30)
         $btnCollectEvidence.Width = $width - $btnCollectEvidence.Left - 10
         $btnRecentErrors.SetBounds((30 + 2 * $buttonWidth),65,$buttonWidth,30)
+        $btnToolbox.Width = $width - 20
         $btnToggleAdvanced.Width = $width
         $pnlAdvanced.Width = $width
         $lblVhd.Width = $width - 20
@@ -409,10 +426,18 @@ function Start-EZfixInterface {
             $pnlAdvanced.Height = [Math]::Max(100, [int]($available * 0.5))
             $logY = $pnlAdvanced.Bottom + 8
         }
-        $lblLog.SetBounds(15,$logY,$width,20)
-        $txtLog.SetBounds(15,($logY + 20),$width,[Math]::Max(100,$form.ClientSize.Height - $logY - 73))
-        $btnReport.Location = [Drawing.Point]::new(15,($txtLog.Bottom + 10))
-        $btnClose.Location = [Drawing.Point]::new(($form.ClientSize.Width - 100),($txtLog.Bottom + 10))
+        $lblLog.SetBounds(15,$logY,($width - 95),20)
+        $btnToggleLog.Location = [Drawing.Point]::new((15 + $width - 85),$logY)
+        $logExpanded = [bool]$btnToggleLog.Tag
+        $txtLog.Visible = $logExpanded
+        if ($logExpanded) {
+            $txtLog.SetBounds(15,($logY + 20),$width,[Math]::Max(100,$form.ClientSize.Height - $logY - 73))
+            $bottomAnchor = $txtLog.Bottom + 10
+        } else {
+            $bottomAnchor = $lblLog.Bottom + 10
+        }
+        $btnReport.Location = [Drawing.Point]::new(15,$bottomAnchor)
+        $btnClose.Location = [Drawing.Point]::new(($form.ClientSize.Width - 100),$bottomAnchor)
     }
 
     function Update-EZfixLayout {
@@ -485,7 +510,8 @@ function Start-EZfixInterface {
         $reportPath=$null
         [Windows.Forms.Cursor]::Current=[Windows.Forms.Cursors]::WaitCursor
         try {
-            $reportPath=Join-Path (New-EZfixReportFolder) 'diagnostics.txt'
+            $safeLabel = ($Label -replace '[^A-Za-z0-9]+','-').Trim('-')
+            $reportPath=Join-Path (New-EZfixReportFolder) ("{0}_{1}.txt" -f $safeLabel,(Get-Date -Format 'HHmmss_fff'))
             $writer=[IO.StreamWriter]::new($reportPath,$false,[Text.UTF8Encoding]::new($false))
             $writer.AutoFlush=$true
             $writer.WriteLine("EZfix | $Label | $(Get-Date -Format o) | $env:COMPUTERNAME")
@@ -564,10 +590,18 @@ function Start-EZfixInterface {
             Start-EZfixCategoryScoping -Category $category 6>&1
         } -ShowPopup
     })
+    $btnToolbox.Add_Click({
+        if (-not $cmbCategory.SelectedItem) { return }
+        Show-EZfixToolCard -Owner $form -Category $cmbCategory.SelectedItem.ToString()
+    })
     $btnDiskEvidence.Add_Click({
         if (-not $cmbDiskCategory.SelectedItem) { return }
         $category = $cmbDiskCategory.SelectedItem.ToString()
         $letter = $txtLetter.Text.Trim()
+        if ($letter -notmatch '^[A-Za-z]$') {
+            [System.Windows.Forms.MessageBox]::Show("Enter a valid drive letter in Offline Analysis first (e.g. D). If the disk has no letter yet, bring it ONLINE above - that assigns one automatically.", "EZfix", 'OK', 'Warning') | Out-Null
+            return
+        }
         Invoke-EZfixAction -Label "Evidence collection ($category, secondary disk ${letter}:)" -Action {
             $evtxRoot = Get-EZfixSecondaryEventPath -DriveLetter $letter
             Start-EZfixCategoryScoping -Category $category -EvtxRoot $evtxRoot 6>&1
@@ -628,6 +662,13 @@ function Start-EZfixInterface {
     })
     $btnToggleAdvanced.Add_Click({
         Update-EZfixLayout -AdvancedExpanded:(-not [bool]$btnToggleAdvanced.Tag)
+    })
+
+    $btnToggleLog.Add_Click({
+        $expanded = -not [bool]$btnToggleLog.Tag
+        $btnToggleLog.Tag = $expanded
+        $btnToggleLog.Text = if ($expanded) { 'Hide' } else { 'Show' }
+        Resize-EZfixAdvancedPanel
     })
 
     $btnDetect.Add_Click({
@@ -836,22 +877,11 @@ function Start-EZfixInterface {
 
     The other EZfix files (Common, Disk-Selector, OfflineAnalysis,
     Performance, Cleanup, RDP, SystemTools, CategoryScoping,
-    Network-Diagnostics) must be saved in the same folder - this script
-    loads them itself if needed.
+    Network-Diagnostics, Toolbox) must be saved in the same folder -
+    this script loads them itself if needed.
 
     Every action's output is logged to Desktop\EZfix\sessions\ as well
     as shown on screen. Section 1 (Quick Fixes) also pops up a
     confirmation dialog when it finishes; section 2 (Advanced) does not
     - see the header comment for why.
 #>
-
-
-
-
-
-
-
-
-
-
-
