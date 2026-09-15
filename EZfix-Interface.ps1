@@ -1046,18 +1046,21 @@ function Start-EZfixInterface {
             }
         }
 
-            # Refresh the list so the displayed state is up to date.
+                  # Refresh the list so the displayed state is up to date.
         $btnDetect.PerformClick()
 
-        # $btnApply itself still holds keyboard focus at this point,
-        # sitting well below the fold (Y 556) on a tab that Resize-
-        # EZfixAdvancedPanel just scrolled back to the top. A focused
-        # control that's now off-screen is exactly what WinForms tends
-        # to auto-scroll back into view the next time anything touches
-        # the layout - undoing that reset. Moving focus to $btnDetect
-        # (always near the top) closes that gap instead of just hoping
-        # the reset sticks.
-        $btnDetect.Focus()
+        # The confirmation MessageBox earlier in this handler pops up
+        # over an already-scrolled-down tab (Apply State Change sits at
+        # Y 556) and reliably corrupts its scroll state on close - just
+        # resetting AutoScrollPosition afterward (see Resize-
+        # EZfixAdvancedPanel) doesn't reliably stick once that's
+        # happened. Confirmed by hand: collapsing and re-expanding
+        # "Advanced" always fixes it, because TabControl fully re-lays-
+        # out a page the moment it becomes the selected tab again.
+        # Switching away and back reproduces that same reset without
+        # touching "Advanced" itself.
+        $tabsAdvanced.SelectedTab = $tabEvidence
+        $tabsAdvanced.SelectedTab = $tabDisk
     })
 
     $btnDiag.Add_Click({
