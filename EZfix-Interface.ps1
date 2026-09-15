@@ -1046,21 +1046,22 @@ function Start-EZfixInterface {
             }
         }
 
-                  # Refresh the list so the displayed state is up to date.
+                         # Refresh the list so the displayed state is up to date.
         $btnDetect.PerformClick()
 
         # The confirmation MessageBox earlier in this handler pops up
         # over an already-scrolled-down tab (Apply State Change sits at
-        # Y 556) and reliably corrupts its scroll state on close - just
-        # resetting AutoScrollPosition afterward (see Resize-
-        # EZfixAdvancedPanel) doesn't reliably stick once that's
-        # happened. Confirmed by hand: collapsing and re-expanding
-        # "Advanced" always fixes it, because TabControl fully re-lays-
-        # out a page the moment it becomes the selected tab again.
-        # Switching away and back reproduces that same reset without
-        # touching "Advanced" itself.
-        $tabsAdvanced.SelectedTab = $tabEvidence
-        $tabsAdvanced.SelectedTab = $tabDisk
+        # Y 556) and reliably corrupts its scroll state on close.
+        # Resetting AutoScrollPosition afterward didn't stick, and
+        # neither did switching tabs away and back - that's too light a
+        # touch, since the TabControl itself stays visible throughout.
+        # What's confirmed, by hand, twice, to actually work: collapsing
+        # "Advanced" and re-expanding it. That's a heavier reset - it
+        # hides and re-shows the whole panel, forcing everything inside
+        # it to be laid out completely fresh - so automate exactly that
+        # instead of a smaller step that doesn't reproduce the same fix.
+        Update-EZfixLayout -AdvancedExpanded:$false
+        Update-EZfixLayout -AdvancedExpanded:$true
     })
 
     $btnDiag.Add_Click({
