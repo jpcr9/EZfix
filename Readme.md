@@ -1,6 +1,6 @@
 # EZfix
 
-**Windows diagnostics and evidence collection, in one graphical workspace.**
+**Portable Windows toolkit for IT diagnostics, evidence collection and read-only VHD/VHDX inspection. Download, extract and launch.**
 
 ## Download and run
 
