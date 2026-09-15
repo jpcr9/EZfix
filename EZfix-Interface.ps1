@@ -1,6 +1,10 @@
 <#
 EZfix v1.0.0 Windows control panel. Modules are loaded from this folder.
-The output area grows with the window; Advanced keeps its own scroll area.
+The output area grows with the window; "Advanced" is a collapsible panel
+split into tabs (Disk Investigation / Evidence / More), each sized to
+fit without dragging the others along - only the tab that actually has
+long content (Disk Investigation, and inside it the disk list itself)
+scrolls on its own.
 Actions run on the UI thread. Review results even when an action completes.
 #>
 
@@ -81,16 +85,15 @@ function Start-EZfixInterface {
     # ClientSize (not Size) so control coordinates, which are relative
     # to the interior area, are guaranteed visible no matter how much
     # space the window's border/title bar takes up. Height is set later
-    # by Update-EZfixLayout, once we know if Advanced starts collapsed.
+    # by Update-EZfixLayout, once we know if "Advanced" starts collapsed.
     $form.ClientSize = New-Object System.Drawing.Size(850, 680)
     $form.StartPosition = 'CenterScreen'
     # Sizable (not FixedDialog) + MaximizeBox so the window can be
     # resized or maximized on small screens. AutoScroll is a fallback
     # safety net for the outer form itself, in case a future addition
-    # ever makes the whole window taller than the screen again - the
-    # Advanced panel below has its own internal scrolling (see
-    # $pnlAdvanced.AutoScroll) which is the normal way tall content
-    # is handled, so this outer one should rarely if ever trigger.
+    # ever makes the whole window taller than the screen again - each
+    # tab inside the "Advanced" panel manages its own overflow (see
+    # $tabsAdvanced below), so this outer one should rarely if ever trigger.
     $form.FormBorderStyle = 'Sizable'
     $form.MaximizeBox = $true
     $form.AutoScroll = $true
@@ -100,11 +103,16 @@ function Start-EZfixInterface {
 
     # ============================================================
     # SECTION 1 - EZfix Quick Fixes
+    # Self-service only: one click, one result, nothing to configure.
+    # Evidence collection and the Toolbox live under "Advanced" instead
+    # (see SECTION 2) - both are scoping aids for whoever picks up the
+    # investigation afterward, not a fix a non-technical user would act
+    # on themselves, so they don't belong on the front screen.
     # ============================================================
     $gbQuick = New-Object System.Windows.Forms.GroupBox
     $gbQuick.Text = "This PC: Diagnostics && Tools"
     $gbQuick.Location = New-Object System.Drawing.Point(15, 10)
-    $gbQuick.Size = New-Object System.Drawing.Size(455, 184)
+    $gbQuick.Size = New-Object System.Drawing.Size(455, 115)
     $form.Controls.Add($gbQuick)
 
     function New-EZfixQuickButton {
@@ -127,41 +135,25 @@ function Start-EZfixInterface {
         $gbQuick.Controls.Add($btn)
     }
 
-    # Third row: category-based evidence collection (replaces the old
-    # single "Evidence" button - see EZfix-CategoryScoping.ps1).
-    $lblEvidence = New-Object System.Windows.Forms.Label
-    $lblEvidence.Text = "Evidence:"
-    $lblEvidence.Location = New-Object System.Drawing.Point(10, 110)
-    $lblEvidence.Size = New-Object System.Drawing.Size(60, 24)
-    $gbQuick.Controls.Add($lblEvidence)
-
-    $cmbCategory = New-Object System.Windows.Forms.ComboBox
-    $cmbCategory.Location = New-Object System.Drawing.Point(75, 107)
-    $cmbCategory.Size = New-Object System.Drawing.Size(150, 24)
-    $cmbCategory.DropDownStyle = 'DropDownList'
-    [void]$cmbCategory.Items.AddRange(@('Network', 'Auth', 'App', 'OS', 'Other'))
-    $cmbCategory.SelectedIndex = 0
-    $gbQuick.Controls.Add($cmbCategory)
-
-    $btnCollectEvidence = New-EZfixQuickButton -Text "Collect Evidence" -X 235 -Y 106 -Width 190
-    $gbQuick.Controls.Add($btnCollectEvidence)
-
-    # Fourth row: the Toolbox - reuses the same category picked above,
-    # so there's no second dropdown to keep in sync. Not documentation -
-    # just enough per tool to open it and try something, with a link to
-    # its own official docs for anything deeper (see EZfix-Toolbox.ps1).
-    $btnToolbox = New-EZfixQuickButton -Text "Open Toolbox for Selected Category" -X 10 -Y 140 -Width 435
-    $gbQuick.Controls.Add($btnToolbox)
-
     # ============================================================
-    # SECTION 2 - Advanced (collapsible disk analysis panel)
+    # SECTION 2 - "Advanced" (collapsible technical panel, tabbed)
+    #
+    # Everything here is for scoping an issue, not fixing it in one
+    # click - so unlike Section 1, none of it pops up a "done" dialog
+    # except evidence collection, which behaves the same wherever it
+    # lives. Split into tabs (Disk Investigation / Evidence / More)
+    # so opening one doesn't force scrolling past the other two - only
+    # Disk Investigation is naturally tall, and within it the disk list
+    # itself scrolls independently (see $pnlDiskList below). "More" is
+    # the submenu for handy tool cards - see the Toolbox tab further
+    # down for what it holds.
     # ============================================================
 
     # The toggle bar doubles as the section header and the
     # expand/collapse control - click it to show or hide everything
     # below (Update-EZfixLayout does the actual show/hide + resize).
     $btnToggleAdvanced = New-Object System.Windows.Forms.Button
-    $btnToggleAdvanced.Location = New-Object System.Drawing.Point(15, 204)
+    $btnToggleAdvanced.Location = New-Object System.Drawing.Point(15, 135)
     $btnToggleAdvanced.Size = New-Object System.Drawing.Size(455, 28)
     $btnToggleAdvanced.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
     $btnToggleAdvanced.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
@@ -169,39 +161,71 @@ function Start-EZfixInterface {
 
     # Everything under "Advanced" lives inside this one panel, so
     # showing/hiding it is a single $pnlAdvanced.Visible flip instead of
-    # toggling five controls separately.
+    # toggling controls separately. It just hosts the tab control below -
+    # it doesn't scroll itself (AutoScroll off) because $tabsAdvanced is
+    # always sized to fit it exactly; each TabPage handles its own
+    # overflow instead, so only the tab that's actually too tall shows a
+    # scrollbar, not the whole section at once.
     $pnlAdvanced = New-Object System.Windows.Forms.Panel
-    $pnlAdvanced.Location = New-Object System.Drawing.Point(15, 238)
-    # Fixed height, regardless of how much content lives inside it -
-    # AutoScroll shows an internal scrollbar once the disk list /
-    # partitions / state / offline-analysis controls (which sit below,
-    # at Y values well past this height) don't all fit. This keeps the
-    # outer window's size predictable no matter how many disks are
-    # detected or how long a disk's model name is, instead of growing
-    # the whole window taller every time content grows. (Its actual
-    # height also grows/shrinks live as the window is resized - see
-    # Resize-EZfixAdvancedPanel below.)
+    $pnlAdvanced.Location = New-Object System.Drawing.Point(15, 169)
+    # Height is recalculated live in Resize-EZfixAdvancedPanel (bigger
+    # now that the Log box below can be collapsed too - see
+    # $btnToggleLog - so "Advanced" isn't stuck splitting the window 50/50
+    # with a Log box that may not even be showing).
     $pnlAdvanced.Size = New-Object System.Drawing.Size(455, 460)
-    $pnlAdvanced.AutoScroll = $true
+    $pnlAdvanced.AutoScroll = $false
     $pnlAdvanced.BackColor = [System.Drawing.Color]::Gainsboro
     $form.Controls.Add($pnlAdvanced)
 
+    $tabsAdvanced = New-Object System.Windows.Forms.TabControl
+    $tabsAdvanced.Location = New-Object System.Drawing.Point(0, 0)
+    $tabsAdvanced.Size = New-Object System.Drawing.Size(455, 460)
+    $pnlAdvanced.Controls.Add($tabsAdvanced)
+
+    $tabDisk = New-Object System.Windows.Forms.TabPage
+    $tabDisk.Text = 'Disk Investigation'
+    $tabDisk.AutoScroll = $true
+    $tabEvidence = New-Object System.Windows.Forms.TabPage
+    $tabEvidence.Text = 'Evidence'
+    $tabEvidence.AutoScroll = $true
+    $tabMore = New-Object System.Windows.Forms.TabPage
+    $tabMore.Text = 'More'
+    $tabMore.AutoScroll = $true
+    $tabsAdvanced.Controls.AddRange(@($tabDisk, $tabEvidence, $tabMore))
+
+    # ---- Tab: Disk Investigation ----
+    # To analyze an affected OS disk without booting it, connect it as a
+    # data disk to a healthy machine (Detect Disks / the disk list
+    # below), or mount a VHD/VHDX image (Open/Find/Detach), bring it
+    # ONLINE, then run Offline Analysis against its drive letter.
     $btnDetect = New-Object System.Windows.Forms.Button
     $btnDetect.Text = "Detect Disks"
-    $btnDetect.Location = New-Object System.Drawing.Point(0, 0)
+    $btnDetect.Location = New-Object System.Drawing.Point(0, 8)
     $btnDetect.Size = New-Object System.Drawing.Size(150, 30)
-    $pnlAdvanced.Controls.Add($btnDetect)
+    $tabDisk.Controls.Add($btnDetect)
+
+    $btnVhdOpen = New-EZfixQuickButton -Text 'Open VHD/VHDX' -X 160 -Y 8 -Width 170
+    $btnVhdFind = New-EZfixQuickButton -Text 'Find VHD/VHDX on this PC' -X 0 -Y 46 -Width 250
+    $btnVhdDetach = New-EZfixQuickButton -Text 'Detach VHD/VHDX' -X 260 -Y 46 -Width 175
+    $btnVhdDetach.Enabled = $false
+    $lblVhd = [Windows.Forms.Label]::new()
+    $lblVhd.Text = 'No VHD/VHDX opened here. Find searches local drives; Open selects a file.'
+    $lblVhd.SetBounds(0, 84, 435, 40)
+    $tabDisk.Controls.AddRange(@($btnVhdOpen, $btnVhdFind, $btnVhdDetach, $lblVhd))
+    $vhdState = @{Path=$null;DiskNumber=$null}
 
     $gbDisks = New-Object System.Windows.Forms.GroupBox
     $gbDisks.Text = 'Detected disks'
-
-    $gbDisks.Location = New-Object System.Drawing.Point(0, 40)
+    $gbDisks.Location = New-Object System.Drawing.Point(0, 132)
     # Tall enough for 5 two-line rows (see $rb.Text below) - a disk's
     # FriendlyName length varies by hardware, so the label is split
     # across two explicit lines instead of relying on one long line
-    # that either overflows the box or wraps unpredictably.
+    # that either overflows the box or wraps unpredictably. This box's
+    # own internal scrollbar ($pnlDiskList.AutoScroll) is what lets you
+    # scroll through the disk list specifically when there are more
+    # disks than fit, independent of everything else in this tab.
     $gbDisks.Size = New-Object System.Drawing.Size(435, 255)
-    $pnlAdvanced.Controls.Add($gbDisks)
+    $tabDisk.Controls.Add($gbDisks)
     $pnlDiskList = [Windows.Forms.Panel]::new()
     $pnlDiskList.SetBounds(5,18,425,230)
     $pnlDiskList.AutoScroll = $true
@@ -250,9 +274,9 @@ function Start-EZfixInterface {
 
     $gbPartitions = New-Object System.Windows.Forms.GroupBox
     $gbPartitions.Text = "Partitions on selected disk"
-    $gbPartitions.Location = New-Object System.Drawing.Point(0, 305)
+    $gbPartitions.Location = New-Object System.Drawing.Point(0, 395)
     $gbPartitions.Size = New-Object System.Drawing.Size(435, 90)
-    $pnlAdvanced.Controls.Add($gbPartitions)
+    $tabDisk.Controls.Add($gbPartitions)
 
     $txtPartitions = New-Object System.Windows.Forms.TextBox
     $txtPartitions.Location = New-Object System.Drawing.Point(10, 20)
@@ -266,9 +290,9 @@ function Start-EZfixInterface {
 
     $gbState = New-Object System.Windows.Forms.GroupBox
     $gbState.Text = "Desired state for the selected disk"
-    $gbState.Location = New-Object System.Drawing.Point(0, 405)
+    $gbState.Location = New-Object System.Drawing.Point(0, 493)
     $gbState.Size = New-Object System.Drawing.Size(435, 55)
-    $pnlAdvanced.Controls.Add($gbState)
+    $tabDisk.Controls.Add($gbState)
 
     $rbOnline = New-Object System.Windows.Forms.RadioButton
     $rbOnline.Text = "ONLINE"
@@ -285,9 +309,9 @@ function Start-EZfixInterface {
     $btnApply = New-Object System.Windows.Forms.Button
     $btnApply.Text = "Apply State Change"
     $btnApply.Enabled=$false
-    $btnApply.Location = New-Object System.Drawing.Point(0, 470)
+    $btnApply.Location = New-Object System.Drawing.Point(0, 556)
     $btnApply.Size = New-Object System.Drawing.Size(210, 30)
-    $pnlAdvanced.Controls.Add($btnApply)
+    $tabDisk.Controls.Add($btnApply)
 
     # GroupBox.Text is a single-line caption, not a paragraph - it does
     # not reliably wrap, so the explanation lives in its own wrapped
@@ -295,12 +319,12 @@ function Start-EZfixInterface {
     # (that's what was getting visually cut off before).
     $gbDiag = New-Object System.Windows.Forms.GroupBox
     $gbDiag.Text = "Offline Analysis"
-    $gbDiag.Location = New-Object System.Drawing.Point(0, 510)
+    $gbDiag.Location = New-Object System.Drawing.Point(0, 594)
     $gbDiag.Size = New-Object System.Drawing.Size(435, 95)
-    $pnlAdvanced.Controls.Add($gbDiag)
+    $tabDisk.Controls.Add($gbDiag)
 
     $lblDiagInfo = New-Object System.Windows.Forms.Label
-    $lblDiagInfo.Text = "Disk must already be ONLINE with a drive letter (below). Same letter is used by 'Target mounted disk' above."
+    $lblDiagInfo.Text = "Disk must already be ONLINE with a drive letter (below). Same letter is used by Evidence and Toolbox for a secondary disk."
     $lblDiagInfo.Location = New-Object System.Drawing.Point(10, 18)
     $lblDiagInfo.Size = New-Object System.Drawing.Size(415, 32)
     $lblDiagInfo.Font = New-Object System.Drawing.Font("Segoe UI", 8)
@@ -325,12 +349,42 @@ function Start-EZfixInterface {
     $btnDiag.Size = New-Object System.Drawing.Size(170, 28)
     $gbDiag.Controls.Add($btnDiag)
 
+    # ---- Tab: Evidence ----
+    # Category-based evidence collection (see EZfix-CategoryScoping.ps1) -
+    # "This PC" for the live machine, "Secondary Disk" for whatever's
+    # mounted and given a drive letter in the Disk Investigation tab.
+    # Kept together, out of Section 1: this is scoping data for whoever
+    # picks up the investigation, not a self-service fix, and "any
+    # relevant information matters" here, so nothing is trimmed back
+    # the way it is for the front screen.
+    $gbEvidenceHere = New-Object System.Windows.Forms.GroupBox
+    $gbEvidenceHere.Text = 'This PC'
+    $gbEvidenceHere.SetBounds(0, 8, 435, 70)
+    $tabEvidence.Controls.Add($gbEvidenceHere)
+
+    $lblEvidence = New-Object System.Windows.Forms.Label
+    $lblEvidence.Text = "Evidence:"
+    $lblEvidence.Location = New-Object System.Drawing.Point(10, 25)
+    $lblEvidence.Size = New-Object System.Drawing.Size(60, 24)
+    $gbEvidenceHere.Controls.Add($lblEvidence)
+
+    $cmbCategory = New-Object System.Windows.Forms.ComboBox
+    $cmbCategory.Location = New-Object System.Drawing.Point(75, 22)
+    $cmbCategory.Size = New-Object System.Drawing.Size(150, 24)
+    $cmbCategory.DropDownStyle = 'DropDownList'
+    [void]$cmbCategory.Items.AddRange(@('Network', 'Auth', 'App', 'OS', 'Other'))
+    $cmbCategory.SelectedIndex = 0
+    $gbEvidenceHere.Controls.Add($cmbCategory)
+
+    $btnCollectEvidence = New-EZfixQuickButton -Text "Collect Evidence" -X 235 -Y 21 -Width 190
+    $gbEvidenceHere.Controls.Add($btnCollectEvidence)
+
     $gbDiskEvidence = New-Object System.Windows.Forms.GroupBox
-    $gbDiskEvidence.Text = 'Secondary Disk Evidence'
-    $gbDiskEvidence.SetBounds(0,615,435,100)
-    $pnlAdvanced.Controls.Add($gbDiskEvidence)
+    $gbDiskEvidence.Text = 'Secondary Disk'
+    $gbDiskEvidence.SetBounds(0, 86, 435, 100)
+    $tabEvidence.Controls.Add($gbDiskEvidence)
     $lblDiskEvidence = New-Object System.Windows.Forms.Label
-    $lblDiskEvidence.Text = 'Uses the Windows drive letter entered in Offline Analysis above.'
+    $lblDiskEvidence.Text = 'Uses the Windows drive letter entered in Disk Investigation > Offline Analysis.'
     $lblDiskEvidence.SetBounds(10,20,410,32)
     $gbDiskEvidence.Controls.Add($lblDiskEvidence)
     $cmbDiskCategory = New-Object System.Windows.Forms.ComboBox
@@ -341,24 +395,44 @@ function Start-EZfixInterface {
     $gbDiskEvidence.Controls.Add($cmbDiskCategory)
     $btnDiskEvidence = New-EZfixQuickButton -Text 'Collect Disk Evidence' -X 170 -Y 55 -Width 250
     $gbDiskEvidence.Controls.Add($btnDiskEvidence)
-    # Virtual-image actions and status precede the disk inventory.
-    foreach ($control in $pnlAdvanced.Controls) { if ($control -ne $btnDetect) { $control.Top += 90 } }
-    $btnVhdOpen = New-EZfixQuickButton -Text 'Open VHD/VHDX' -X 160 -Y 0 -Width 170
-    $btnVhdDetach = New-EZfixQuickButton -Text 'Detach VHD/VHDX' -X 260 -Y 38 -Width 185
-    $btnVhdDetach.Enabled=$false
-    $btnVhdFind = New-EZfixQuickButton -Text 'Find VHD/VHDX on this PC' -X 0 -Y 38 -Width 250
-    $lblVhd = [Windows.Forms.Label]::new()
-    $lblVhd.Text='No VHD/VHDX opened here. Find searches local drives; Open selects a file.'
-    $lblVhd.SetBounds(0,76,435,50)
-    $pnlAdvanced.Controls.AddRange(@($btnVhdOpen,$btnVhdDetach,$btnVhdFind,$lblVhd))
-    $vhdState = @{Path=$null;DiskNumber=$null}
+
+    # ---- Tab: More (the Toolbox) ----
+    # A submenu inside Advanced for handy tool cards - not much text,
+    # link-rich: what a tool's for, easy setup, a couple of commands to
+    # try, and a link to its own official docs for anything deeper (see
+    # EZfix-Toolbox.ps1). Picked by category, same idea as Evidence
+    # above. Only Network is built out today; picking any other category
+    # just says so (Show-EZfixToolCard handles that gracefully).
+    $lblToolboxInfo = New-Object System.Windows.Forms.Label
+    $lblToolboxInfo.Text = "Quick-reference cards for tools worth reaching for during an investigation - what each is for, easy setup, and a few commands to start with. Deeper material is each tool's own official docs, linked from its card."
+    $lblToolboxInfo.SetBounds(0, 8, 435, 46)
+    $lblToolboxInfo.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $lblToolboxInfo.ForeColor = [System.Drawing.Color]::DimGray
+    $tabMore.Controls.Add($lblToolboxInfo)
+
+    $lblToolboxCategory = New-Object System.Windows.Forms.Label
+    $lblToolboxCategory.Text = 'Category:'
+    $lblToolboxCategory.Location = New-Object System.Drawing.Point(0, 62)
+    $lblToolboxCategory.Size = New-Object System.Drawing.Size(65, 24)
+    $tabMore.Controls.Add($lblToolboxCategory)
+
+    $cmbToolboxCategory = New-Object System.Windows.Forms.ComboBox
+    $cmbToolboxCategory.Location = New-Object System.Drawing.Point(70, 59)
+    $cmbToolboxCategory.Size = New-Object System.Drawing.Size(150, 24)
+    $cmbToolboxCategory.DropDownStyle = 'DropDownList'
+    [void]$cmbToolboxCategory.Items.AddRange(@('Network', 'Auth', 'App', 'OS', 'Other'))
+    $cmbToolboxCategory.SelectedIndex = 0
+    $tabMore.Controls.Add($cmbToolboxCategory)
+
+    $btnToolbox = New-EZfixQuickButton -Text "Open Toolbox" -X 230 -Y 58 -Width 195
+    $tabMore.Controls.Add($btnToolbox)
 
     # ============================================================
     # Log - shared by both sections, also written to the session log file.
-    # Its Y position moves depending on whether Advanced is expanded -
+    # Its Y position moves depending on whether "Advanced" is expanded -
     # Update-EZfixLayout (defined further below, called at the end)
     # positions it and resizes the window. $btnToggleLog lets the Log
-    # box itself be collapsed independently of Advanced or of resizing
+    # box itself be collapsed independently of "Advanced" or of resizing
     # the window - same idea as $btnToggleAdvanced, just for this box.
     # ============================================================
     $lblLog = New-Object System.Windows.Forms.Label
@@ -405,25 +479,47 @@ function Start-EZfixInterface {
         $btnCleanup.SetBounds((30 + 2 * $buttonWidth),25,$buttonWidth,30)
         $btnRDP.SetBounds(10,62,$buttonWidth,38)
         $btnOverview.SetBounds((20 + $buttonWidth),65,$buttonWidth,30)
-        $btnCollectEvidence.Width = $width - $btnCollectEvidence.Left - 10
         $btnRecentErrors.SetBounds((30 + 2 * $buttonWidth),65,$buttonWidth,30)
-        $btnToolbox.Width = $width - 20
         $btnToggleAdvanced.Width = $width
         $pnlAdvanced.Width = $width
-        $lblVhd.Width = $width - 20
-        foreach ($group in @($gbDisks,$gbPartitions,$gbState,$gbDiag,$gbDiskEvidence)) { $group.Width = $width - 20 }
+        $tabsAdvanced.Width = $pnlAdvanced.ClientSize.Width
+
+        $innerWidth = [Math]::Max(300, $tabsAdvanced.ClientSize.Width - 20)
+
+        # -- Disk Investigation tab --
+        $btnVhdOpen.SetBounds(160,8,($innerWidth - 160),30)
+        $findWidth = [int]($innerWidth * 0.55)
+        $btnVhdFind.SetBounds(0,46,$findWidth,30)
+        $btnVhdDetach.SetBounds(($findWidth + 10),46,($innerWidth - $findWidth - 10),30)
+        $lblVhd.Width = $innerWidth
+        foreach ($group in @($gbDisks,$gbPartitions,$gbState,$gbDiag)) { $group.Width = $innerWidth }
         $pnlDiskList.Width = $gbDisks.Width - 10
         foreach ($labels in $diskLabels) {
             $labels.Name.Width=$pnlDiskList.Width - 55
             $labels.Details.Width=$pnlDiskList.Width - 120
         }
         $txtPartitions.Width = $gbPartitions.Width - 20
+
+        # -- Evidence tab --
+        $gbEvidenceHere.Width = $innerWidth
+        $btnCollectEvidence.Width = $gbEvidenceHere.Width - $btnCollectEvidence.Left - 10
+        $gbDiskEvidence.Width = $innerWidth
         $lblDiskEvidence.Width = $gbDiskEvidence.Width - 20
         $btnDiskEvidence.Width = $gbDiskEvidence.Width - $btnDiskEvidence.Left - 10
+
+        # -- More tab (Toolbox) --
+        $lblToolboxInfo.Width = $innerWidth
+        $btnToolbox.Width = $innerWidth - $btnToolbox.Left
+
         $logY = $btnToggleAdvanced.Bottom + 8
         if ($btnToggleAdvanced.Tag -eq $true) {
-            $available = [Math]::Max(240, $form.ClientSize.Height - $pnlAdvanced.Top - 80)
-            $pnlAdvanced.Height = [Math]::Max(100, [int]($available * 0.5))
+            # "Advanced" can now claim most of the window - the Log box
+            # below no longer needs half the space reserved for it
+            # since it can be collapsed to a single bar with
+            # $btnToggleLog when you need the room.
+            $available = [Math]::Max(300, $form.ClientSize.Height - $pnlAdvanced.Top - 80)
+            $pnlAdvanced.Height = [Math]::Max(220, [int]($available * 0.7))
+            $tabsAdvanced.Height = $pnlAdvanced.ClientSize.Height
             $logY = $pnlAdvanced.Bottom + 8
         }
         $lblLog.SetBounds(15,$logY,($width - 95),20)
@@ -444,7 +540,7 @@ function Start-EZfixInterface {
         param([bool]$AdvancedExpanded)
         $btnToggleAdvanced.Tag = $AdvancedExpanded
         $pnlAdvanced.Visible = $AdvancedExpanded
-        $btnToggleAdvanced.Text = 'Advanced: Secondary Disk Investigation'
+        $btnToggleAdvanced.Text = 'Advanced'
         Resize-EZfixAdvancedPanel
     }
     function Update-PartitionsDisplay {
@@ -583,6 +679,12 @@ function Start-EZfixInterface {
     $btnRecentErrors.Add_Click({
         Invoke-EZfixAction -Label 'Recent Errors (this PC, last 24 hours)' -Action { Start-EZfixRecentErrors 6>&1 } -ShowPopup
     })
+    # ============================================================
+    # SECTION 2 - events ("Advanced" panel)
+    # Evidence collection still pops up a "done" dialog like Section 1 -
+    # it runs to completion and reports a result the same way. Disk
+    # state changes and Offline Analysis don't (see header comment).
+    # ============================================================
     $btnCollectEvidence.Add_Click({
         if (-not $cmbCategory.SelectedItem) { return }
         $category = $cmbCategory.SelectedItem.ToString()
@@ -591,15 +693,15 @@ function Start-EZfixInterface {
         } -ShowPopup
     })
     $btnToolbox.Add_Click({
-        if (-not $cmbCategory.SelectedItem) { return }
-        Show-EZfixToolCard -Owner $form -Category $cmbCategory.SelectedItem.ToString()
+        if (-not $cmbToolboxCategory.SelectedItem) { return }
+        Show-EZfixToolCard -Owner $form -Category $cmbToolboxCategory.SelectedItem.ToString()
     })
     $btnDiskEvidence.Add_Click({
         if (-not $cmbDiskCategory.SelectedItem) { return }
         $category = $cmbDiskCategory.SelectedItem.ToString()
         $letter = $txtLetter.Text.Trim()
         if ($letter -notmatch '^[A-Za-z]$') {
-            [System.Windows.Forms.MessageBox]::Show("Enter a valid drive letter in Offline Analysis first (e.g. D). If the disk has no letter yet, bring it ONLINE above - that assigns one automatically.", "EZfix", 'OK', 'Warning') | Out-Null
+            [System.Windows.Forms.MessageBox]::Show("Enter a valid drive letter in Disk Investigation > Offline Analysis first (e.g. D). If the disk has no letter yet, bring it ONLINE there - that assigns one automatically.", "EZfix", 'OK', 'Warning') | Out-Null
             return
         }
         Invoke-EZfixAction -Label "Evidence collection ($category, secondary disk ${letter}:)" -Action {
@@ -607,9 +709,6 @@ function Start-EZfixInterface {
             Start-EZfixCategoryScoping -Category $category -EvtxRoot $evtxRoot 6>&1
         } -ShowPopup
     })
-    # ============================================================
-    # SECTION 2 - events (Advanced panel - no pop-up, see header comment)
-    # ============================================================
     function Open-EZfixSelectedVhd([string]$ImagePath) {
         if (-not $ImagePath) { return }
         if ($vhdState.Path) {
@@ -881,7 +980,8 @@ function Start-EZfixInterface {
     this script loads them itself if needed.
 
     Every action's output is logged to Desktop\EZfix\sessions\ as well
-    as shown on screen. Section 1 (Quick Fixes) also pops up a
-    confirmation dialog when it finishes; section 2 (Advanced) does not
-    - see the header comment for why.
+    as shown on screen. Section 1 (Quick Fixes) and Evidence collection
+    (under Advanced) pop up a confirmation dialog when they finish; disk
+    state changes and Offline Analysis (also under Advanced) do not -
+    see the header comment for why.
 #>
