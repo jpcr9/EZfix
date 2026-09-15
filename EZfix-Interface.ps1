@@ -1,3 +1,11 @@
+<#
+EZfix v1.0.0 Windows control panel. Modules are loaded from this folder.
+The output area grows with the window; "Advanced" is a collapsible panel
+split into tabs (Disk Investigation / Evidence / More), each sized to
+fit without dragging the others along - only the tab that actually has
+long content (Disk Investigation, and inside it the disk list itself)
+scrolls on its own.
+Actions run on the UI thread. Review results even when an action completes.
 #>
 
 #Requires -Version 7.0
@@ -276,6 +284,14 @@ function Start-EZfixInterface {
                 $rbOnline.Enabled=$canChange; $rbOffline.Enabled=$canChange
                 if(-not $canChange){$rbOnline.Checked=$false; $rbOffline.Checked=$false}
                 Update-PartitionsDisplay -DiskNumber $this.Tag
+                # Selecting a radio buried inside this AutoScroll tab can
+                # pull its scroll offset away from (0,0) even though every
+                # control's own position is unchanged - WinForms doesn't
+                # reset that on its own once it's nudged, so every button
+                # on the tab appears to have "moved." Forcing it back to
+                # (0,0) here is the fix, not a workaround for anything
+                # actually wrong with the layout itself.
+                $tabDisk.AutoScrollPosition = [Drawing.Point]::new(0, 0)
             }
         })
         $pnlDiskList.Controls.Add($rb)
@@ -584,6 +600,16 @@ function Start-EZfixInterface {
         }
         $btnReport.Location = [Drawing.Point]::new(15,$bottomAnchor)
         $btnClose.Location = [Drawing.Point]::new(($form.ClientSize.Width - 100),$bottomAnchor)
+
+        # General safety net for the same AutoScroll-offset issue fixed
+        # above on disk selection: any full layout pass re-asserts every
+        # control's correct position, so any stray scroll offset picked
+        # up since the last pass (window resize, tab switch, focus
+        # change) is worth clearing here too, not just on that one
+        # specific trigger.
+        foreach ($tab in @($tabDisk, $tabEvidence, $tabMore)) {
+            $tab.AutoScrollPosition = [Drawing.Point]::new(0, 0)
+        }
     }
 
     function Update-EZfixLayout {
@@ -756,7 +782,7 @@ function Start-EZfixInterface {
         # script, not a set of functions, so dot-sourcing it would run
         # the whole diagnostic immediately instead of just loading it.
         $moduleFiles = $ezfixDependencies.Values | Select-Object -Unique
-        $dotSource = ($moduleFiles | ForEach-Object { ". '$_'" }) -join '; '
+        $dotSource = ($moduleFiles | ForEach-Object { ". '$(Join-Path $PSScriptRoot $_)'" }) -join '; '
         $welcome = "EZfix modules loaded from this folder - functions are ready to call directly. Network-Diagnostics.ps1 is a script, not a function: run it with .\Network-Diagnostics.ps1 when you need it."
         $command = "Set-Location -LiteralPath '$PSScriptRoot'; $dotSource; Write-Host '$welcome' -ForegroundColor Cyan"
         try {
