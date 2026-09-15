@@ -1,11 +1,3 @@
-<#
-EZfix v1.0.0 Windows control panel. Modules are loaded from this folder.
-The output area grows with the window; "Advanced" is a collapsible panel
-split into tabs (Disk Investigation / Evidence / More), each sized to
-fit without dragging the others along - only the tab that actually has
-long content (Disk Investigation, and inside it the disk list itself)
-scrolls on its own.
-Actions run on the UI thread. Review results even when an action completes.
 #>
 
 #Requires -Version 7.0
@@ -176,6 +168,38 @@ function Start-EZfixInterface {
     $pnlAdvanced.AutoScroll = $false
     $pnlAdvanced.BackColor = [System.Drawing.Color]::Gainsboro
     $form.Controls.Add($pnlAdvanced)
+
+    # Drag handle between "Advanced" and the Log box below it, so the
+    # split between them is a manual choice instead of a fixed ratio -
+    # same $splitState-as-a-mutable-hashtable idiom as $reportState /
+    # $vhdState elsewhere in this file, so a plain drag doesn't need any
+    # extra scope plumbing. Only shown while Advanced is expanded - see
+    # Resize-EZfixAdvancedPanel, which also owns its position/width.
+    $splitState = @{ Dragging = $false; StartY = 0; StartHeight = 0; AdvancedOverride = $null }
+    $splitterAdvLog = New-Object System.Windows.Forms.Panel
+    $splitterAdvLog.Height = 6
+    $splitterAdvLog.BackColor = [System.Drawing.Color]::DarkGray
+    $splitterAdvLog.Cursor = [System.Windows.Forms.Cursors]::SizeNS
+    $form.Controls.Add($splitterAdvLog)
+    $splitterAdvLog.Add_MouseDown({
+        $splitState.Dragging = $true
+        $splitState.StartY = [System.Windows.Forms.Cursor]::Position.Y
+        $splitState.StartHeight = $pnlAdvanced.Height
+        $splitterAdvLog.Capture = $true
+    })
+    $splitterAdvLog.Add_MouseMove({
+        if (-not $splitState.Dragging) { return }
+        $deltaY = [System.Windows.Forms.Cursor]::Position.Y - $splitState.StartY
+        $available = [Math]::Max(300, $form.ClientSize.Height - $pnlAdvanced.Top - 80)
+        $minAdv = 220
+        $maxAdv = [Math]::Max($minAdv, $available)
+        $splitState.AdvancedOverride = [Math]::Min($maxAdv, [Math]::Max($minAdv, ($splitState.StartHeight + $deltaY)))
+        Resize-EZfixAdvancedPanel
+    })
+    $splitterAdvLog.Add_MouseUp({
+        $splitState.Dragging = $false
+        $splitterAdvLog.Capture = $false
+    })
 
     $tabsAdvanced = New-Object System.Windows.Forms.TabControl
     $tabsAdvanced.Location = New-Object System.Drawing.Point(0, 0)
@@ -427,6 +451,16 @@ function Start-EZfixInterface {
     $btnToolbox = New-EZfixQuickButton -Text "Open Toolbox" -X 230 -Y 58 -Width 195
     $tabMore.Controls.Add($btnToolbox)
 
+    $lblPwshInfo = New-Object System.Windows.Forms.Label
+    $lblPwshInfo.Text = "Opens a new elevated PowerShell window with every EZfix module already loaded, so any function - not just what's wired to a button here - can be called directly."
+    $lblPwshInfo.SetBounds(0, 96, 435, 34)
+    $lblPwshInfo.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $lblPwshInfo.ForeColor = [System.Drawing.Color]::DimGray
+    $tabMore.Controls.Add($lblPwshInfo)
+
+    $btnPwshConsole = New-EZfixQuickButton -Text "Open PowerShell (EZfix Loaded)" -X 0 -Y 134 -Width 435
+    $tabMore.Controls.Add($btnPwshConsole)
+
     # ============================================================
     # Log - shared by both sections, also written to the session log file.
     # Its Y position moves depending on whether "Advanced" is expanded -
@@ -510,17 +544,33 @@ function Start-EZfixInterface {
         # -- More tab (Toolbox) --
         $lblToolboxInfo.Width = $innerWidth
         $btnToolbox.Width = $innerWidth - $btnToolbox.Left
+        $lblPwshInfo.Width = $innerWidth
+        $btnPwshConsole.Width = $innerWidth
 
         $logY = $btnToggleAdvanced.Bottom + 8
         if ($btnToggleAdvanced.Tag -eq $true) {
             # "Advanced" can now claim most of the window - the Log box
             # below no longer needs half the space reserved for it
             # since it can be collapsed to a single bar with
-            # $btnToggleLog when you need the room.
+            # $btnToggleLog when you need the room. $splitState.AdvancedOverride
+            # is set instead of the 0.7 default once the user has
+            # dragged $splitterAdvLog at least once - re-clamped here
+            # every layout pass so a later window resize can't leave it
+            # oversized or the Log box with no room at all.
             $available = [Math]::Max(300, $form.ClientSize.Height - $pnlAdvanced.Top - 80)
-            $pnlAdvanced.Height = [Math]::Max(220, [int]($available * 0.7))
+            if ($null -ne $splitState.AdvancedOverride) {
+                $pnlAdvanced.Height = [Math]::Min($available, [Math]::Max(220, $splitState.AdvancedOverride))
+            }
+            else {
+                $pnlAdvanced.Height = [Math]::Max(220, [int]($available * 0.7))
+            }
             $tabsAdvanced.Height = $pnlAdvanced.ClientSize.Height
-            $logY = $pnlAdvanced.Bottom + 8
+            $splitterAdvLog.Visible = $true
+            $splitterAdvLog.SetBounds($pnlAdvanced.Left, ($pnlAdvanced.Bottom + 2), $pnlAdvanced.Width, 6)
+            $logY = $splitterAdvLog.Bottom + 6
+        }
+        else {
+            $splitterAdvLog.Visible = $false
         }
         $lblLog.SetBounds(15,$logY,($width - 95),20)
         $btnToggleLog.Location = [Drawing.Point]::new((15 + $width - 85),$logY)
@@ -695,6 +745,31 @@ function Start-EZfixInterface {
     $btnToolbox.Add_Click({
         if (-not $cmbToolboxCategory.SelectedItem) { return }
         Show-EZfixToolCard -Owner $form -Category $cmbToolboxCategory.SelectedItem.ToString()
+    })
+    $btnPwshConsole.Add_Click({
+        # Reuses $ezfixDependencies (defined at the top of this file) as
+        # the single source of truth for "what counts as an EZfix
+        # module" - one list, used both to load this GUI and to load a
+        # manual console, so the two can never drift apart. Network-
+        # Diagnostics.ps1 is deliberately excluded, same reason it's
+        # excluded from $ezfixDependencies itself: it's a top-level
+        # script, not a set of functions, so dot-sourcing it would run
+        # the whole diagnostic immediately instead of just loading it.
+        $moduleFiles = $ezfixDependencies.Values | Select-Object -Unique
+        $dotSource = ($moduleFiles | ForEach-Object { ". '$_'" }) -join '; '
+        $welcome = "EZfix modules loaded from this folder - functions are ready to call directly. Network-Diagnostics.ps1 is a script, not a function: run it with .\Network-Diagnostics.ps1 when you need it."
+        $command = "Set-Location -LiteralPath '$PSScriptRoot'; $dotSource; Write-Host '$welcome' -ForegroundColor Cyan"
+        try {
+            # No -Verb RunAs: this GUI already requires admin (#Requires
+            # -RunAsAdministrator at the top), so the child process
+            # inherits that elevation automatically - adding RunAs here
+            # would just trigger a second, redundant UAC prompt.
+            Start-Process -FilePath 'pwsh' -ArgumentList @('-NoExit', '-Command', $command) -ErrorAction Stop
+            Add-EZfixLogLine "Opened an elevated PowerShell session with EZfix modules loaded."
+        }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Could not open PowerShell: $($_.Exception.Message)", 'EZfix', 'OK', 'Error') | Out-Null
+        }
     })
     $btnDiskEvidence.Add_Click({
         if (-not $cmbDiskCategory.SelectedItem) { return }
