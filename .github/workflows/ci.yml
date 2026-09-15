@@ -33,7 +33,7 @@ jobs:
           # style preferences the codebase hasn't been cleaned up
           # against yet. Warnings still print below, just don't fail
           # the build.
-          $results = Invoke-ScriptAnalyzer -Path . -Recurse
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1
           $errors = $results | Where-Object { $_.Severity -eq 'Error' }
  
           if ($results) {
