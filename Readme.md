@@ -4,11 +4,9 @@
 
 ## Download and run
 
-### [Download EZfix v1.0.0 for Windows](https://github.com/jpcr9/EZfix/releases/download/v1.0.0/EZfix-v1.0.0.zip)
+**Get the current version (recommended):**
 
-[Release notes and downloads](https://github.com/jpcr9/EZfix/releases/latest)
-
-1. Download **EZfix-v1.0.0.zip** above.
+1. On the [repository's main page](https://github.com/jpcr9/EZfix), click **Code → Download ZIP** (or `git pull` if you already have it cloned). This always matches the latest code on `main`.
 2. Right-click the ZIP, choose **Extract All**, and save the folder somewhere permanent, such as Documents.
 3. Open the extracted folder and double-click **Launch-EZfix.bat**.
 4. Approve the administrator prompt if you trust the download. If PowerShell 7 is missing, EZfix offers to install it from Microsoft.
@@ -17,9 +15,7 @@
 
 EZfix is portable: keep its files together and do not run it inside the ZIP. If you move the folder, run Launch-EZfix.bat again to update the shortcut. An unrelated shortcut named EZfix is preserved. Desktop restrictions may prevent shortcut creation; the launcher still works.
 
-For everyday use, choose the named EZfix ZIP from Releases above - it is a tested, versioned build.
-
-**Testing changes that haven't been released yet?** The Releases ZIP is a fixed snapshot from whenever that version was tagged - it does not update when new commits land on `main`, so re-downloading it will keep giving you the same old build. Instead, use GitHub's own **Code → Download ZIP** button on the repository's main page (or `git pull` if you already have it cloned), extract that into its own folder, and run Launch-EZfix.bat the same way. Do this every time you want the current development code.
+**Prefer a fixed, tested build instead?** [Releases](https://github.com/jpcr9/EZfix/releases/latest) has versioned ZIPs that don't change once published - useful if you specifically want a known, unchanging snapshot rather than whatever is newest. Keep in mind a Release ZIP is frozen at the moment it was tagged, so it will lag behind `main` until a new version is cut; re-downloading the same Release link will keep giving you that same older build, not new commits.
 
 ## Tools
 
@@ -70,6 +66,6 @@ An incomplete result does not mean no problems were found. Review warnings and r
 
 ## About
 
-A PowerShell and Windows Forms IT support project focused on practical triage, readable results and evidence collection. Source is included for inspection.
+A personal, still-evolving project, built while learning practical Windows troubleshooting and PowerShell - not a polished commercial tool, so expect occasional rough edges and features still in progress. It focuses on practical triage, readable results and evidence collection. Source is included for anyone who wants to look under the hood, and feedback or issue reports are welcome.
 
 MIT license. See [LICENSE](LICENSE).
