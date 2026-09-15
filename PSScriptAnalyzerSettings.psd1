@@ -1,4 +1,4 @@
-{
+@{
     # PSAvoidAssignmentToAutomaticVariable false-positives on the
     # deliberate Windows PowerShell 5.1 compatibility pattern used in
     # EZfix-Cleanup.ps1, EZfix-Performance.ps1 and EZfix-RDP.ps1:
