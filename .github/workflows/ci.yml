@@ -1,0 +1,64 @@
+name: CI
+ 
+# Runs automatically on every push to main, and can also be started by
+# hand from the Actions tab ("Run workflow") without needing a new commit
+# - useful the first time, to check this works before relying on it.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+ 
+jobs:
+  test:
+    # Windows is required here, not a preference - both PSScriptAnalyzer
+    # and the tests below touch Windows-only things (the Storage module,
+    # real disk/registry cmdlets), same as EZfix itself.
+    runs-on: windows-latest
+ 
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+ 
+      - name: Install Pester and PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          Install-Module -Name PSScriptAnalyzer -Force -SkipPublisherCheck -Scope CurrentUser
+ 
+      - name: Lint every script with PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          # Error-severity only, for now: this catches real problems
+          # (like a broken variable reference) without also blocking on
+          # style preferences the codebase hasn't been cleaned up
+          # against yet. Warnings still print below, just don't fail
+          # the build.
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse
+          $errors = $results | Where-Object { $_.Severity -eq 'Error' }
+ 
+          if ($results) {
+              Write-Host "--- PSScriptAnalyzer findings (all severities) ---"
+              $results | Format-Table -AutoSize | Out-String | Write-Host
+          }
+ 
+          if ($errors) {
+              throw "PSScriptAnalyzer found $($errors.Count) error-level issue(s) - see the table above."
+          }
+ 
+          Write-Host "No error-level issues found."
+ 
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          Import-Module Pester -MinimumVersion 5.0 -Force
+ 
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests/'
+          $config.Run.PassThru = $true
+          $config.Output.Verbosity = 'Detailed'
+ 
+          $result = Invoke-Pester -Configuration $config
+ 
+          if ($result.FailedCount -gt 0) {
+              throw "$($result.FailedCount) of $($result.TotalCount) Pester test(s) failed."
+          }
