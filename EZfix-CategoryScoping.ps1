@@ -50,8 +50,11 @@ function Get-EZfixScopingSessionFolder {
 function Start-EZfixCategoryScoping {
     [CmdletBinding()]
     param(
+        # 'All' runs Network + Auth + App + OS together into one folder
+        # (their filenames don't collide - see the switch below). 'Other'
+        # stays a separate, narrower catch-all and is not part of 'All'.
         [Parameter(Mandatory)]
-        [ValidateSet('Network', 'Auth', 'App', 'OS', 'Other')]
+        [ValidateSet('Network', 'Auth', 'App', 'OS', 'Other', 'All')]
         [string]$Category,
 
         # Path to a mounted disk's event log folder (e.g.
@@ -155,8 +158,13 @@ function Start-EZfixCategoryScoping {
         }
     }
 
+    # 'All' matches four of the five clauses below (every one except
+    # 'Other') by testing each label as a condition instead of a plain
+    # literal - PowerShell's switch runs every clause that matches, not
+    # just the first, so a single pass fills one folder with all four
+    # categories' files.
     switch ($Category) {
-        'Network' {
+        { $_ -in 'Network', 'All' } {
             Save-EZfixData -Description "Network configuration" -OutFileName 'NetworkConfig.csv' -Collector {
                 Get-NetIPConfiguration | Select-Object InterfaceAlias, InterfaceDescription, IPv4Address, IPv4DefaultGateway, DNSServer
             }
@@ -169,7 +177,7 @@ function Start-EZfixCategoryScoping {
             Save-EZfixEventLog -LogName 'System' -Level 2, 3 -ProviderName 'Tcpip', 'Dhcp-Client', 'Dnsapi', 'NETLOGON' -OutFileName 'System-network-events.csv'
         }
 
-        'Auth' {
+        { $_ -in 'Auth', 'All' } {
             Save-EZfixEventLog -LogName 'Security' -Id 4625 -OutFileName 'Security-logon-failures.csv'
             Save-EZfixEventLog -LogName 'Security' -Id 4740 -OutFileName 'Security-account-lockouts.csv'
             Save-EZfixEventLog -LogName 'Security' -Id 4624 -OutFileName 'Security-successful-logons.csv'
@@ -181,7 +189,7 @@ function Start-EZfixCategoryScoping {
             }
         }
 
-        'App' {
+        { $_ -in 'App', 'All' } {
             Save-EZfixEventLog -LogName 'Application' -Level 2, 3 -OutFileName 'Application-errors-warnings.csv'
             Save-EZfixEventLog -LogName 'Application' -ProviderName 'Application Error', '.NET Runtime' -OutFileName 'Application-crashes.csv'
             Save-EZfixData -Description "Startup programs" -OutFileName 'StartupPrograms.csv' -Collector {
@@ -189,7 +197,7 @@ function Start-EZfixCategoryScoping {
             }
         }
 
-        'OS' {
+        { $_ -in 'OS', 'All' } {
             Save-EZfixEventLog -LogName 'System' -Level 2, 3 -OutFileName 'System-errors-warnings.csv'
             Save-EZfixData -Description "OS version and uptime" -OutFileName 'OSInfo.csv' -Collector {
                 $os = Get-CimInstance Win32_OperatingSystem
@@ -245,5 +253,10 @@ function Start-EZfixCategoryScoping {
             Collects auth-related event log evidence from a mounted,
             offline disk's event logs instead (live-only data points,
             like local users, are skipped in this mode).
-#>
 
+        Start-EZfixCategoryScoping -Category All
+            Runs Network + Auth + App + OS together into one folder -
+            for when you'd rather grab everything than guess which
+            category the problem falls under. 'Other' is a separate,
+            narrower catch-all and is not included in All.
+#>
