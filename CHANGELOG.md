@@ -1,3 +1,10 @@
+# v1.0.1
+
+- Added Auth, App, OS and Other categories to the Toolbox, alongside the existing Network cards.
+- Added an "Open PowerShell (EZfix Loaded)" button that opens an elevated console with every module already loaded.
+- Added a draggable splitter between "Advanced" and the Log box so their split is adjustable, not fixed.
+- Fixed a scroll-position bug on the Disk Investigation tab that could visually displace controls after a state change.
+
 # v1.0.0
 
 - First public release, incorporating the tested previews.
