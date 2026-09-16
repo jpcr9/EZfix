@@ -1203,23 +1203,57 @@ function Start-EZfixInterface {
             return
         }
 
-        # Same spirit as the disk state-change confirmation: one upfront
-        # dialog, then -Confirm:$false below so it isn't asked twice.
-        # Set-EZfixLastKnownGood itself only ever writes anything if
-        # Default and Last Known Good actually differ - running this
-        # when they already match is always a safe no-op.
-        $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "This checks disk ${letter}:'s Last Known Good configuration and switches to it if different from Default. If they already match, nothing is changed. Continue?",
-            "Confirm Last Known Good check", 'YesNo', 'Warning'
-        )
-        if ($confirm -ne 'Yes') {
-            Add-EZfixLogLine "Last Known Good check canceled (not confirmed)."
+        # Genuine two-step flow, not a blind confirm-then-act: this
+        # first step only ever reads, so it needs no confirmation at
+        # all - same reasoning as Run Offline Analysis or List Recent
+        # Updates. The specific Default/Last Known Good values are only
+        # known after this runs, so the confirmation for actually
+        # switching them (below) can show the real values instead of
+        # asking to "continue" before anyone knows what that means.
+        Add-EZfixLogLine "=== Last Known Good check (${letter}:) ==="
+        [Windows.Forms.Cursor]::Current = [Windows.Forms.Cursors]::WaitCursor
+        $status = $null
+        try {
+            $results = Get-EZfixLastKnownGoodStatus -DriveLetter $letter 6>&1
+            foreach ($item in $results) {
+                if ($item -is [System.Management.Automation.InformationRecord]) {
+                    Add-EZfixLogLine $item.ToString()
+                }
+                else {
+                    $status = $item
+                }
+            }
+        }
+        catch {
+            Add-EZfixLogLine "ERROR: $($_.Exception.Message)"
+        }
+        finally {
+            [Windows.Forms.Cursor]::Current = [Windows.Forms.Cursors]::Default
+        }
+
+        if (-not $status) {
+            Add-EZfixLogLine "--- Last Known Good check (${letter}:) finished with errors ---"
             return
         }
 
-        Invoke-EZfixAction -Label "Last Known Good check (${letter}:)" -Action {
-            Set-EZfixLastKnownGood -DriveLetter $letter -Confirm:$false 6>&1
+        if (-not $status.NeedsChange) {
+            Add-EZfixLogLine "--- Last Known Good check (${letter}:) finished - already Last Known Good, nothing to do ---"
+            return
         }
+
+        $formatSet = { param($n) "ControlSet{0:D3}" -f $n }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Disk ${letter}: - Default is $(& $formatSet $status.Default), Last Known Good is $(& $formatSet $status.LastKnownGood). Switch Default to $(& $formatSet $status.LastKnownGood)?",
+            "Confirm Last Known Good switch", 'YesNo', 'Warning'
+        )
+        if ($confirm -ne 'Yes') {
+            Add-EZfixLogLine "Last Known Good switch canceled (not confirmed)."
+            return
+        }
+
+        Invoke-EZfixAction -Label "Last Known Good switch (${letter}:)" -Action {
+            Set-EZfixLastKnownGoodDefault -DriveLetter $letter -Confirm:$false 6>&1
+        } -ShowPopup
     })
 
     $btnListUpdates.Add_Click({
