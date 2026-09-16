@@ -89,7 +89,14 @@ function Invoke-EZfixWithOfflineHive {
     }
 }
 
-function Start-EZfixOfflineAnalysis {
+function Get-EZfixOfflineWindowsPath {
+    <#
+        Resolves a drive letter to its Windows folder, after confirming
+        it both exists and is not the disk currently running this copy
+        of Windows. Every offline-disk action in EZfix goes through
+        this one check, so "never touch the live disk" only has to be
+        implemented correctly in a single place, not once per feature.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -101,14 +108,27 @@ function Start-EZfixOfflineAnalysis {
     $windowsPath = Join-Path $root 'Windows'
 
     if (-not (Test-Path $windowsPath)) {
-        Write-Host "No Windows folder was found at $root - check that this is the correct drive letter and that the disk is online." -ForegroundColor Red
-        return
+        throw "No Windows folder was found at $root - check that this is the correct drive letter and that the disk is online."
     }
 
     $targetDiskNumber = (Get-Partition -DriveLetter $DriveLetter -ErrorAction Stop).DiskNumber
     $liveDiskNumber = (Get-Partition -DriveLetter $env:SystemDrive.TrimEnd(':') -ErrorAction Stop).DiskNumber
     if ($null -eq $targetDiskNumber -or $null -eq $liveDiskNumber) { throw 'Cannot identify the target and live system disks safely.' }
-    if ($targetDiskNumber -eq $liveDiskNumber) { throw 'Offline Analysis cannot target the running Windows disk. Select a secondary disk.' }
+    if ($targetDiskNumber -eq $liveDiskNumber) { throw 'This cannot target the running Windows disk. Select a secondary disk.' }
+
+    return $windowsPath
+}
+
+function Start-EZfixOfflineAnalysis {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[A-Za-z]$')]
+        [string]$DriveLetter
+    )
+
+    $windowsPath = Get-EZfixOfflineWindowsPath -DriveLetter $DriveLetter
+    $root = "$($DriveLetter):\"
     $reportFolder = New-EZfixReportFolder
 
     Write-Host "=== EZFIX OFFLINE DISK ANALYSIS ===" -ForegroundColor Cyan
@@ -319,12 +339,148 @@ function Start-EZfixOfflineAnalysis {
     Write-Host "Evidence saved to: $reportFolder" -ForegroundColor Green
 }
 
+function Set-EZfixLastKnownGood {
+    <#
+        Reads an offline disk's ControlSet bookkeeping (Select\Current,
+        \Default, \LastKnownGood) and, if Default isn't already pointing
+        at LastKnownGood, offers to switch it - the same mechanism
+        behind the old F8-menu "Last Known Good Configuration" option,
+        done here against a mounted disk instead of at boot time.
+
+        Always reports what it found. Only writes anything if Default
+        and LastKnownGood actually differ, and even then only if
+        confirmed via ShouldProcess (-WhatIf reports what would change
+        without changing it; -Confirm:$false skips the prompt and
+        applies it).
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[A-Za-z]$')]
+        [string]$DriveLetter
+    )
+
+    $windowsPath = Get-EZfixOfflineWindowsPath -DriveLetter $DriveLetter
+    $systemHivePath = Join-Path $windowsPath 'System32\config\SYSTEM'
+
+    if (-not (Test-Path $systemHivePath)) {
+        throw "The SYSTEM hive was not found at $systemHivePath"
+    }
+
+    $copyFolder = Join-Path ([System.IO.Path]::GetTempPath()) ('EZfixLKG_' + [guid]::NewGuid().ToString('N'))
+    New-Item -Path $copyFolder -ItemType Directory -Force | Out-Null
+    try {
+        foreach ($name in @('SYSTEM','SYSTEM.LOG1','SYSTEM.LOG2')) {
+            $source = Join-Path (Split-Path $systemHivePath) $name
+            if (Test-Path -LiteralPath $source) {
+                $destination = Join-Path $copyFolder $name
+                Copy-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
+                (Get-Item -LiteralPath $destination).IsReadOnly = $false
+            }
+        }
+        $localHive = Join-Path $copyFolder 'SYSTEM'
+
+        Invoke-EZfixWithOfflineHive -HiveFilePath $localHive -ScriptBlock {
+            param($HiveRoot)
+            $select = Get-ItemProperty -Path "$HiveRoot\Select" -ErrorAction Stop
+            $formatSet = { param($number) "ControlSet{0:D3}" -f $number }
+
+            Write-Host "Currently booted from: $(& $formatSet $select.Current)"
+            Write-Host "Default (what boots normally): $(& $formatSet $select.Default)"
+            Write-Host "Last Known Good: $(& $formatSet $select.LastKnownGood)"
+
+            if ($select.Default -eq $select.LastKnownGood) {
+                Write-Host "Default is already Last Known Good - nothing to change." -ForegroundColor Green
+                return
+            }
+
+            # This is the only write this function ever makes: a single
+            # DWORD value, on a hive that Invoke-EZfixWithOfflineHive
+            # guarantees gets unloaded afterward even if this throws.
+            if ($PSCmdlet.ShouldProcess("$DriveLetter`: (offline)", "Set Default ControlSet to Last Known Good ($(& $formatSet $select.LastKnownGood))")) {
+                Set-ItemProperty -Path "$HiveRoot\Select" -Name Default -Value $select.LastKnownGood -Type DWord -ErrorAction Stop
+                Write-Host "Default ControlSet changed to $(& $formatSet $select.LastKnownGood). This takes effect the next time that disk's Windows starts." -ForegroundColor Green
+            }
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $copyFolder -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-EZfixOfflineUpdates {
+    <#
+        Lists installed update packages on an offline Windows image,
+        newest first - read-only, the "diagnose" half of removing a
+        problem update. The exact PackageName shown here is what
+        Remove-EZfixOfflineUpdate needs to actually remove one.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[A-Za-z]$')]
+        [string]$DriveLetter
+    )
+
+    $windowsPath = Get-EZfixOfflineWindowsPath -DriveLetter $DriveLetter
+    $imagePath = Split-Path $windowsPath -Parent
+
+    Write-Host "=== INSTALLED UPDATES (offline image at $imagePath) ===" -ForegroundColor Cyan
+    $packages = @(Get-WindowsPackage -Path $imagePath -ErrorAction Stop |
+        Where-Object { $_.PackageState -eq 'Installed' -and $_.ReleaseType -in @('SecurityUpdate','Update','CriticalUpdate','UpdateRollUp') } |
+        Sort-Object InstallTime -Descending)
+
+    if (-not $packages) {
+        Write-Host "No update packages were found, or none matched Windows Update / Security Update / Critical Update / Update Rollup."
+        return
+    }
+
+    foreach ($package in ($packages | Select-Object -First 20)) {
+        Write-Host ""
+        Write-Host "Installed: $($package.InstallTime) | Type: $($package.ReleaseType)"
+        Write-Host "PackageName: $($package.PackageName)"
+    }
+    Write-Host ""
+    Write-Host "Showing the $([Math]::Min(20,$packages.Count)) most recent of $($packages.Count) total. Copy the exact PackageName of the one you suspect, to remove it with Remove-EZfixOfflineUpdate."
+}
+
+function Remove-EZfixOfflineUpdate {
+    <#
+        Removes one update package from an offline Windows image by its
+        exact PackageName (from Get-EZfixOfflineUpdates). This is the
+        first EZfix action that modifies an offline OS rather than just
+        reading it - there is no dry-run beyond -WhatIf and no automatic
+        undo; the only way back is reinstalling the update afterward.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[A-Za-z]$')]
+        [string]$DriveLetter,
+
+        [Parameter(Mandatory)]
+        [string]$PackageName
+    )
+
+    $windowsPath = Get-EZfixOfflineWindowsPath -DriveLetter $DriveLetter
+    $imagePath = Split-Path $windowsPath -Parent
+
+    if ($PSCmdlet.ShouldProcess("$imagePath (offline)", "Remove update package $PackageName")) {
+        Write-Host "Removing $PackageName from $imagePath - this can take several minutes." -ForegroundColor Yellow
+        Remove-WindowsPackage -Path $imagePath -PackageName $PackageName -NoRestart -ErrorAction Stop
+        Write-Host "Removed $PackageName. This takes effect the next time that disk's Windows starts." -ForegroundColor Green
+    }
+}
+
 <#
     USAGE (run PowerShell as Administrator):
         . .\EZfix-Common.ps1
         . .\EZfix-OfflineAnalysis.ps1
         Start-EZfixOfflineAnalysis -DriveLetter D
+        Set-EZfixLastKnownGood -DriveLetter D -Confirm:$false
+        Get-EZfixOfflineUpdates -DriveLetter D
+        Remove-EZfixOfflineUpdate -DriveLetter D -PackageName <exact name> -Confirm:$false
 
-    Before this: the data disk must be ONLINE (Disk-Selector.ps1) and
-    have a drive letter assigned.
+    Before any of this: the data disk must be ONLINE (Disk-Selector.ps1)
+    and have a drive letter assigned.
 #>
