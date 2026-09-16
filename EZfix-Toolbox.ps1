@@ -235,6 +235,17 @@ $script:EZfixToolbox = [ordered]@{
                 'bootrec /rebuildbcd       # rebuilds the boot configuration data store from scratch'
                 'bcdedit /enum             # lists current boot entries - useful on a machine that does boot, to inspect them before changing anything'
             )
+        },
+        [pscustomobject]@{
+            Name      = 'Reboot to UEFI Firmware Settings (built-in)'
+            ToolLink  = $null
+            DocLink   = 'https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/advanced-startup-options-ga-secure-boot'
+            WhatFor   = "Reboots straight into the UEFI/BIOS setup screen, skipping the timing-sensitive 'hit the key at the right instant' step. Reach for it when you need to change a firmware setting (boot order, Secure Boot, virtualization) and want to get there reliably."
+            EasySetup = 'Already on every UEFI machine - run from an elevated terminal. CAUTION: this reboots the machine immediately, with no confirmation and no way to cancel once run - only use it when you are ready for that right now.'
+            Commands  = @(
+                'shutdown /r /fw /t 0      # reboots now, landing in firmware setup instead of Windows'
+                'shutdown /r /fw /t 30     # same, but with a 30 second delay - gives a moment to cancel with shutdown /a'
+            )
         }
     )
     'Other' = @(
