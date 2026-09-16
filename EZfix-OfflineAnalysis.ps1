@@ -174,9 +174,18 @@ function Start-EZfixOfflineAnalysis {
             foreach ($name in @('SYSTEM','SYSTEM.LOG1','SYSTEM.LOG2')) {
                 $source=Join-Path (Split-Path $systemHivePath) $name
                 if (Test-Path -LiteralPath $source) {
-                    $destination=Join-Path $copyFolder $name
-                    Copy-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
-                    (Get-Item -LiteralPath $destination).IsReadOnly=$false
+                    try {
+                        $destination=Join-Path $copyFolder $name
+                        Copy-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
+                        (Get-Item -LiteralPath $destination).IsReadOnly=$false
+                        Write-Host "Copied $name" -ForegroundColor DarkGray
+                    }
+                    catch {
+                        Write-Host "Could not copy ${name}: $($_.Exception.Message) - continuing without it." -ForegroundColor DarkGray
+                    }
+                }
+                else {
+                    Write-Host "$name not present on this disk - continuing without it." -ForegroundColor DarkGray
                 }
             }
             $localHive=Join-Path $copyFolder 'SYSTEM'
@@ -373,9 +382,18 @@ function Set-EZfixLastKnownGood {
         foreach ($name in @('SYSTEM','SYSTEM.LOG1','SYSTEM.LOG2')) {
             $source = Join-Path (Split-Path $systemHivePath) $name
             if (Test-Path -LiteralPath $source) {
-                $destination = Join-Path $copyFolder $name
-                Copy-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
-                (Get-Item -LiteralPath $destination).IsReadOnly = $false
+                try {
+                    $destination = Join-Path $copyFolder $name
+                    Copy-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
+                    (Get-Item -LiteralPath $destination).IsReadOnly = $false
+                    Write-Host "Copied $name" -ForegroundColor DarkGray
+                }
+                catch {
+                    Write-Host "Could not copy ${name}: $($_.Exception.Message) - continuing without it." -ForegroundColor DarkGray
+                }
+            }
+            else {
+                Write-Host "$name not present on this disk - continuing without it." -ForegroundColor DarkGray
             }
         }
         $localHive = Join-Path $copyFolder 'SYSTEM'
