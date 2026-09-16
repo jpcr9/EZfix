@@ -1,4 +1,35 @@
 # Read-only tools for the running Windows computer.
+
+function Test-EZfixPendingReboot {
+    <#
+        Checks the three well-known Windows indicators for a pending
+        restart: the Component Based Servicing flag, the Windows Update
+        flag, and queued file-rename operations left behind by an
+        installer that couldn't replace a file while it was in use.
+        Purely read-only - this only reports state, never restarts
+        anything.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $reasons = @()
+    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') {
+        $reasons += 'Component Based Servicing'
+    }
+    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
+        $reasons += 'Windows Update'
+    }
+    $pendingRename = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+    if ($pendingRename -and $pendingRename.PendingFileRenameOperations) {
+        $reasons += 'Pending file rename operations'
+    }
+
+    [pscustomobject]@{
+        RebootPending = ($reasons.Count -gt 0)
+        Reasons       = $reasons
+    }
+}
+
 function Start-EZfixSystemOverview {
     [CmdletBinding()]
     param()
@@ -17,6 +48,29 @@ function Start-EZfixSystemOverview {
         Write-Host "CPU: $($processor.Name.Trim()) | Cores: $($processor.NumberOfCores) | Logical processors: $($processor.NumberOfLogicalProcessors)"
     }
     Write-Host ("Installed RAM: {0:N1} GB | Available memory: {1:N1} GB" -f ($computer.TotalPhysicalMemory / 1GB),($os.FreePhysicalMemory / 1MB))
+    Write-Host ''
+    Write-Host '--- Restart and firmware status ---'
+    try {
+        $reboot = Test-EZfixPendingReboot -ErrorAction Stop
+        if ($reboot.RebootPending) {
+            Write-Host "Restart pending: YES ($($reboot.Reasons -join ', '))"
+        }
+        else {
+            Write-Host 'Restart pending: No'
+        }
+    } catch { Write-Warning "Restart status unavailable: $($_.Exception.Message)" }
+    Write-Host "Firmware mode: $(if ($env:firmware_type) { $env:firmware_type } else { 'Not reported' })"
+    try {
+        $firmwareEntries = & bcdedit /enum firmware 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host ''
+            Write-Host '--- Firmware boot entries (read-only) ---'
+            $firmwareEntries | ForEach-Object { Write-Host $_ }
+        }
+        else {
+            Write-Warning "Firmware boot entries unavailable: $($firmwareEntries -join ' ')"
+        }
+    } catch { Write-Warning "Firmware boot entries unavailable: $($_.Exception.Message)" }
     Write-Host ''
     Write-Host '--- Graphics adapters ---'
     try {
@@ -63,6 +117,21 @@ function Start-EZfixSystemOverview {
         else { Write-Host "$($drive.DeviceID) | Capacity unavailable (the volume may be locked)." }
     }
     if (-not $drives) { Write-Host 'No local fixed drives were reported.' }
+    Write-Host ''
+    Write-Host '--- Physical disk health ---'
+    try {
+        $physicalDisks = @(Get-PhysicalDisk -ErrorAction Stop)
+        foreach ($disk in $physicalDisks) {
+            Write-Host "$($disk.FriendlyName) | Health: $($disk.HealthStatus) | Operational: $($disk.OperationalStatus) | Media: $($disk.MediaType) | Size: $([math]::Round($disk.Size / 1GB, 1)) GB"
+            try {
+                $reliability = Get-StorageReliabilityCounter -PhysicalDisk $disk -ErrorAction Stop
+                $wear = if ($null -ne $reliability.Wear) { "$($reliability.Wear)%" } else { 'Not reported (typical for HDDs)' }
+                Write-Host "  Temperature: $(if ($reliability.Temperature) { "$($reliability.Temperature) C" } else { 'Not reported' }) | Wear: $wear | Read errors: $($reliability.ReadErrorsTotal) | Write errors: $($reliability.WriteErrorsTotal) | Power-on hours: $($reliability.PowerOnHours)"
+            } catch { Write-Host "  Reliability counters unavailable: $($_.Exception.Message)" }
+        }
+        if (-not $physicalDisks) { Write-Host 'No physical disks were reported.' }
+        Write-Host 'HealthStatus reflects the storage subsystem''s own assessment - a drive can still fail without warning here first.'
+    } catch { Write-Warning "Physical disk health unavailable: $($_.Exception.Message)" }
     Write-Host '=== END OF SYSTEM OVERVIEW ==='
 }
 
@@ -115,4 +184,3 @@ function Get-EZfixSecondaryEventPath {
     if (-not (Test-Path -LiteralPath $path)) { throw "No Windows event log folder found at $path. Check the drive letter in Offline Analysis." }
     return $path
 }
-
