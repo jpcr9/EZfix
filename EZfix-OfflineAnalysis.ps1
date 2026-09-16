@@ -348,21 +348,15 @@ function Start-EZfixOfflineAnalysis {
     Write-Host "Evidence saved to: $reportFolder" -ForegroundColor Green
 }
 
-function Set-EZfixLastKnownGood {
+function Get-EZfixLastKnownGoodStatus {
     <#
         Reads an offline disk's ControlSet bookkeeping (Select\Current,
-        \Default, \LastKnownGood) and, if Default isn't already pointing
-        at LastKnownGood, offers to switch it - the same mechanism
-        behind the old F8-menu "Last Known Good Configuration" option,
-        done here against a mounted disk instead of at boot time.
-
-        Always reports what it found. Only writes anything if Default
-        and LastKnownGood actually differ, and even then only if
-        confirmed via ShouldProcess (-WhatIf reports what would change
-        without changing it; -Confirm:$false skips the prompt and
-        applies it).
+        \Default, \LastKnownGood) - read-only, the "diagnose" half of
+        the Last Known Good workflow. Reports what it found and whether
+        Default and LastKnownGood actually differ; makes no changes at
+        all, so this never needs its own confirmation.
     #>
-    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
         [ValidatePattern('^[A-Za-z]$')]
@@ -406,6 +400,74 @@ function Set-EZfixLastKnownGood {
             Write-Host "Currently booted from: $(& $formatSet $select.Current)"
             Write-Host "Default (what boots normally): $(& $formatSet $select.Default)"
             Write-Host "Last Known Good: $(& $formatSet $select.LastKnownGood)"
+
+            [pscustomobject]@{
+                Current       = [int]$select.Current
+                Default       = [int]$select.Default
+                LastKnownGood = [int]$select.LastKnownGood
+                NeedsChange   = ($select.Default -ne $select.LastKnownGood)
+            }
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $copyFolder -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Set-EZfixLastKnownGoodDefault {
+    <#
+        Switches an offline disk's Default ControlSet to its
+        LastKnownGood value - the same mechanism behind the old F8-menu
+        "Last Known Good Configuration" option, done here against a
+        mounted disk instead of at boot time.
+
+        Re-reads Select itself before writing rather than trusting a
+        value passed in from an earlier Get-EZfixLastKnownGoodStatus
+        call, and does nothing if Default and LastKnownGood already
+        match by the time this actually runs.
+
+        Gated by ShouldProcess: -WhatIf reports what would change
+        without changing it; -Confirm:$false skips the prompt and
+        applies it - the GUI's own confirmation dialog, shown only
+        after the caller already knows the specific values involved,
+        takes the place of this prompt there.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[A-Za-z]$')]
+        [string]$DriveLetter
+    )
+
+    $windowsPath = Get-EZfixOfflineWindowsPath -DriveLetter $DriveLetter
+    $systemHivePath = Join-Path $windowsPath 'System32\config\SYSTEM'
+
+    if (-not (Test-Path $systemHivePath)) {
+        throw "The SYSTEM hive was not found at $systemHivePath"
+    }
+
+    $copyFolder = Join-Path ([System.IO.Path]::GetTempPath()) ('EZfixLKG_' + [guid]::NewGuid().ToString('N'))
+    New-Item -Path $copyFolder -ItemType Directory -Force | Out-Null
+    try {
+        foreach ($name in @('SYSTEM','SYSTEM.LOG1','SYSTEM.LOG2')) {
+            $source = Join-Path (Split-Path $systemHivePath) $name
+            if (Test-Path -LiteralPath $source) {
+                try {
+                    $destination = Join-Path $copyFolder $name
+                    Copy-Item -LiteralPath $source -Destination $destination -ErrorAction Stop
+                    (Get-Item -LiteralPath $destination).IsReadOnly = $false
+                }
+                catch {
+                    Write-Host "Could not copy ${name}: $($_.Exception.Message) - continuing without it." -ForegroundColor DarkGray
+                }
+            }
+        }
+        $localHive = Join-Path $copyFolder 'SYSTEM'
+
+        Invoke-EZfixWithOfflineHive -HiveFilePath $localHive -ScriptBlock {
+            param($HiveRoot)
+            $select = Get-ItemProperty -Path "$HiveRoot\Select" -ErrorAction Stop
+            $formatSet = { param($number) "ControlSet{0:D3}" -f $number }
 
             if ($select.Default -eq $select.LastKnownGood) {
                 Write-Host "Default is already Last Known Good - nothing to change." -ForegroundColor Green
@@ -495,7 +557,8 @@ function Remove-EZfixOfflineUpdate {
         . .\EZfix-Common.ps1
         . .\EZfix-OfflineAnalysis.ps1
         Start-EZfixOfflineAnalysis -DriveLetter D
-        Set-EZfixLastKnownGood -DriveLetter D -Confirm:$false
+        Get-EZfixLastKnownGoodStatus -DriveLetter D
+        Set-EZfixLastKnownGoodDefault -DriveLetter D -Confirm:$false
         Get-EZfixOfflineUpdates -DriveLetter D
         Remove-EZfixOfflineUpdate -DriveLetter D -PackageName <exact name> -Confirm:$false
 
