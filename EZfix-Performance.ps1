@@ -146,3 +146,158 @@ function Start-EZfixPerformance {
         Start-EZfixPerformance
 #>
 
+function Get-EZfixPerformanceCaptureStatus {
+    <#
+        Reports whether a performance capture is currently running, and
+        since when - read-only, used to detect a capture left running
+        from a previous session (e.g. EZfix was closed without clicking
+        Stop). The marker file is the only place this state lives -
+        logman itself runs independently of EZfix's own process, so
+        this is how a later session finds a capture a previous one
+        started.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $markerPath = Join-Path ([System.IO.Path]::GetTempPath()) 'EZfixPerfCapture.json'
+    if (-not (Test-Path -LiteralPath $markerPath)) {
+        return [pscustomobject]@{ Running = $false; StartTime = $null }
+    }
+    try {
+        $state = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
+        return [pscustomobject]@{ Running = $true; StartTime = [datetime]$state.StartTime }
+    }
+    catch {
+        return [pscustomobject]@{ Running = $false; StartTime = $null }
+    }
+}
+
+function Start-EZfixPerformanceCapture {
+    <#
+        Starts a Windows-native Data Collector Set (via logman)
+        sampling CPU, memory and disk every 5 seconds, running until
+        Stop-EZfixPerformanceCapture is called - open-ended, for
+        catching a problem while it's actually happening rather than a
+        single point-in-time reading.
+
+        Deliberately built on logman/relog rather than a custom timer -
+        reliable background sampling is something Windows already does
+        well; EZfix's job here is just starting it, stopping it, and
+        turning the result into a report alongside the logs from the
+        same window (see Stop-EZfixPerformanceCapture).
+    #>
+    [CmdletBinding()]
+    param()
+
+    if (-not $IsWindows) {
+        throw 'Performance capture uses logman, which is Windows-only.'
+    }
+
+    $markerPath = Join-Path ([System.IO.Path]::GetTempPath()) 'EZfixPerfCapture.json'
+    if (Test-Path -LiteralPath $markerPath) {
+        $existing = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
+        throw "A capture is already running (started $($existing.StartTime)). Stop it first."
+    }
+
+    $collectorName = 'EZfixPerfCapture'
+    $captureFolder = Join-Path ([System.IO.Path]::GetTempPath()) ('EZfixPerfCapture_' + [guid]::NewGuid().ToString('N'))
+    New-Item -Path $captureFolder -ItemType Directory -Force | Out-Null
+    $blgPath = Join-Path $captureFolder 'counters.blg'
+
+    # Same three areas as the single-snapshot check above (CPU, memory,
+    # disk) - this isn't a different feature, just the same questions
+    # answered over time instead of at one instant.
+    $counters = @(
+        '\Processor(_Total)\% Processor Time'
+        '\Memory\Available MBytes'
+        '\PhysicalDisk(_Total)\% Disk Time'
+        '\PhysicalDisk(_Total)\Avg. Disk Queue Length'
+    )
+
+    $createResult = & logman create counter $collectorName -c $counters -si 5 -o $blgPath -f bin -ow 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "logman create failed: $createResult" }
+
+    $startResult = & logman start $collectorName 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        & logman delete $collectorName 2>&1 | Out-Null
+        throw "logman start failed: $startResult"
+    }
+
+    $startTime = Get-Date
+    [pscustomobject]@{
+        CollectorName = $collectorName
+        CaptureFolder = $captureFolder
+        BlgPath       = $blgPath
+        StartTime     = $startTime
+    } | ConvertTo-Json | Set-Content -Path $markerPath -Encoding UTF8
+
+    Write-Host "Performance capture started at $startTime. Sampling CPU, memory and disk every 5 seconds." -ForegroundColor Green
+    Write-Host "Reproduce the problem now if you can, then run Stop-EZfixPerformanceCapture." -ForegroundColor Green
+}
+
+function Stop-EZfixPerformanceCapture {
+    <#
+        Stops the capture started by Start-EZfixPerformanceCapture,
+        converts the counter log to CSV, pulls System/Application
+        Critical/Error events from the exact same time window, and
+        writes both into one report folder - a correlated view of what
+        the machine was doing and what it logged, for the same stretch
+        of time.
+    #>
+    [CmdletBinding()]
+    param()
+
+    if (-not $IsWindows) {
+        throw 'Performance capture uses logman, which is Windows-only.'
+    }
+
+    $markerPath = Join-Path ([System.IO.Path]::GetTempPath()) 'EZfixPerfCapture.json'
+    if (-not (Test-Path -LiteralPath $markerPath)) {
+        throw 'No performance capture appears to be running. Start one first with Start-EZfixPerformanceCapture.'
+    }
+    $state = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json
+    $startTime = [datetime]$state.StartTime
+    $endTime = Get-Date
+
+    $stopResult = & logman stop $state.CollectorName 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Host "WARNING: logman stop reported: $stopResult" -ForegroundColor Red }
+
+    $reportFolder = New-EZfixReportFolder
+    $csvPath = Join-Path $reportFolder 'performance-capture.csv'
+    $relogResult = & relog $state.BlgPath -f CSV -o $csvPath -y 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Could not convert the counter log to CSV - $relogResult" -ForegroundColor Red
+    }
+    else {
+        $minutes = [math]::Round(($endTime - $startTime).TotalMinutes, 1)
+        Write-Host "OK: performance counters saved to performance-capture.csv ($minutes minutes captured)" -ForegroundColor Green
+    }
+
+    & logman delete $state.CollectorName 2>&1 | Out-Null
+    Remove-Item -LiteralPath $state.CaptureFolder -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
+
+    Write-Host ""
+    Write-Host "--- Logs during the same window ($startTime to $endTime) ---" -ForegroundColor Yellow
+    foreach ($logName in @('System','Application')) {
+        try {
+            $events = Get-WinEvent -FilterHashtable @{ LogName = $logName; Level = 1, 2; StartTime = $startTime; EndTime = $endTime } -ErrorAction Stop
+            $outFile = Join-Path $reportFolder "$logName-during-capture.csv"
+            $events | Select-Object TimeCreated, LevelDisplayName, ProviderName, Id, Message |
+                Export-Csv -Path $outFile -NoTypeInformation -Encoding UTF8
+            Write-Host "OK: $($events.Count) Critical/Error events saved from $logName during the capture window" -ForegroundColor Green
+        }
+        catch {
+            if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') {
+                Write-Host "No Critical/Error events in $logName during the capture window - a good sign." -ForegroundColor DarkGray
+            }
+            else {
+                Write-Host "Could not read ${logName}: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+    }
+
+    Write-Host ""
+    Write-Host "Report folder: $reportFolder" -ForegroundColor Cyan
+}
+
