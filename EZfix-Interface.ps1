@@ -23,6 +23,9 @@ $ezfixDependencies = [ordered]@{
     'Set-DataDiskState'          = 'Disk-Selector.ps1'
     'Start-EZfixOfflineAnalysis' = 'EZfix-OfflineAnalysis.ps1'
     'Start-EZfixPerformance'     = 'EZfix-Performance.ps1'
+    'Start-EZfixPerformanceCapture' = 'EZfix-Performance.ps1'
+    'Stop-EZfixPerformanceCapture'  = 'EZfix-Performance.ps1'
+    'Get-EZfixPerformanceCaptureStatus' = 'EZfix-Performance.ps1'
     'Start-EZfixCleanup'         = 'EZfix-Cleanup.ps1'
     'Start-EZfixConnectivity'    = 'EZfix-Connectivity.ps1'
     'Start-EZfixRDPCheck'        = 'EZfix-RDP.ps1'
@@ -389,6 +392,57 @@ function Start-EZfixInterface {
     $btnDiag.Size = New-Object System.Drawing.Size(170, 28)
     $gbDiag.Controls.Add($btnDiag)
 
+    # These two are the only actions anywhere in EZfix that can change
+    # an offline disk rather than just read it - Last Known Good is a
+    # single, reversible-in-spirit registry value; removing an update
+    # is not something with an automatic undo. Both reuse the same
+    # drive letter field above, and both still refuse the running
+    # system disk via Get-EZfixOfflineWindowsPath, the same guard
+    # Offline Analysis itself uses.
+    $gbRecovery = New-Object System.Windows.Forms.GroupBox
+    $gbRecovery.Text = "Recovery Actions (offline, can modify the disk)"
+    $gbRecovery.Location = New-Object System.Drawing.Point(0, 699)
+    $gbRecovery.Size = New-Object System.Drawing.Size(435, 185)
+    $tabDisk.Controls.Add($gbRecovery)
+
+    $lblRecoveryInfo = New-Object System.Windows.Forms.Label
+    $lblRecoveryInfo.Text = "Uses the same Drive field as Offline Analysis above. Everything else on this tab only reads a disk - these two can change one."
+    $lblRecoveryInfo.Location = New-Object System.Drawing.Point(10, 18)
+    $lblRecoveryInfo.Size = New-Object System.Drawing.Size(415, 30)
+    $lblRecoveryInfo.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $lblRecoveryInfo.ForeColor = [System.Drawing.Color]::DimGray
+    $gbRecovery.Controls.Add($lblRecoveryInfo)
+
+    $btnLkgCheck = New-Object System.Windows.Forms.Button
+    $btnLkgCheck.Text = "Check / Restore Last Known Good"
+    $btnLkgCheck.Location = New-Object System.Drawing.Point(10, 54)
+    $btnLkgCheck.Size = New-Object System.Drawing.Size(415, 28)
+    $gbRecovery.Controls.Add($btnLkgCheck)
+
+    $btnListUpdates = New-Object System.Windows.Forms.Button
+    $btnListUpdates.Text = "List Recent Updates"
+    $btnListUpdates.Location = New-Object System.Drawing.Point(10, 90)
+    $btnListUpdates.Size = New-Object System.Drawing.Size(415, 28)
+    $gbRecovery.Controls.Add($btnListUpdates)
+
+    $lblPackageName = New-Object System.Windows.Forms.Label
+    $lblPackageName.Text = "Package to remove (exact PackageName from the list above):"
+    $lblPackageName.Location = New-Object System.Drawing.Point(10, 126)
+    $lblPackageName.Size = New-Object System.Drawing.Size(415, 16)
+    $lblPackageName.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $gbRecovery.Controls.Add($lblPackageName)
+
+    $txtPackageName = New-Object System.Windows.Forms.TextBox
+    $txtPackageName.Location = New-Object System.Drawing.Point(10, 144)
+    $txtPackageName.Size = New-Object System.Drawing.Size(300, 22)
+    $gbRecovery.Controls.Add($txtPackageName)
+
+    $btnRemoveUpdate = New-Object System.Windows.Forms.Button
+    $btnRemoveUpdate.Text = "Remove"
+    $btnRemoveUpdate.Location = New-Object System.Drawing.Point(320, 143)
+    $btnRemoveUpdate.Size = New-Object System.Drawing.Size(105, 24)
+    $gbRecovery.Controls.Add($btnRemoveUpdate)
+
     # ---- Tab: Evidence ----
     # Category-based evidence collection (see EZfix-CategoryScoping.ps1) -
     # "This PC" for the live machine, "Secondary Disk" for whatever's
@@ -435,6 +489,28 @@ function Start-EZfixInterface {
     $gbDiskEvidence.Controls.Add($cmbDiskCategory)
     $btnDiskEvidence = New-EZfixQuickButton -Text 'Collect Disk Evidence' -X 170 -Y 55 -Width 250
     $gbDiskEvidence.Controls.Add($btnDiskEvidence)
+
+    # Built on logman/relog (Windows' own Data Collector Set engine),
+    # not a custom timer - EZfix just starts it, stops it, and merges
+    # the result with the logs from the same window. Open-ended by
+    # design: click Start, reproduce the problem, click Stop, rather
+    # than a fixed duration that might miss it.
+    $gbPerfCapture = New-Object System.Windows.Forms.GroupBox
+    $gbPerfCapture.Text = 'Performance + Logs Capture (This PC)'
+    $gbPerfCapture.SetBounds(0, 194, 435, 95)
+    $tabEvidence.Controls.Add($gbPerfCapture)
+
+    $lblPerfCaptureInfo = New-Object System.Windows.Forms.Label
+    $lblPerfCaptureInfo.Text = "Samples CPU/memory/disk every 5 seconds until you click Stop, then saves the counters and any errors logged during that same window into one report - useful for catching an intermittent problem while it's happening."
+    $lblPerfCaptureInfo.SetBounds(10, 18, 415, 34)
+    $lblPerfCaptureInfo.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    $lblPerfCaptureInfo.ForeColor = [System.Drawing.Color]::DimGray
+    $gbPerfCapture.Controls.Add($lblPerfCaptureInfo)
+
+    $btnPerfCapture = New-Object System.Windows.Forms.Button
+    $btnPerfCapture.Text = 'Start Performance Capture'
+    $btnPerfCapture.SetBounds(10, 56, 415, 28)
+    $gbPerfCapture.Controls.Add($btnPerfCapture)
 
     # ---- Tab: More (the Toolbox) ----
     # A submenu inside Advanced for handy tool cards - not much text,
@@ -542,7 +618,7 @@ function Start-EZfixInterface {
         $btnVhdFind.SetBounds(0,46,$findWidth,30)
         $btnVhdDetach.SetBounds(($findWidth + 10),46,($innerWidth - $findWidth - 10),30)
         $lblVhd.Width = $innerWidth
-        foreach ($group in @($gbDisks,$gbPartitions,$gbState,$gbDiag)) { $group.Width = $innerWidth }
+        foreach ($group in @($gbDisks,$gbPartitions,$gbState,$gbDiag,$gbRecovery)) { $group.Width = $innerWidth }
         $pnlDiskList.Width = $gbDisks.Width - 10
         foreach ($labels in $diskLabels) {
             $labels.Name.Width=$pnlDiskList.Width - 55
@@ -556,6 +632,9 @@ function Start-EZfixInterface {
         $gbDiskEvidence.Width = $innerWidth
         $lblDiskEvidence.Width = $gbDiskEvidence.Width - 20
         $btnDiskEvidence.Width = $gbDiskEvidence.Width - $btnDiskEvidence.Left - 10
+        $gbPerfCapture.Width = $innerWidth
+        $lblPerfCaptureInfo.Width = $gbPerfCapture.Width - 20
+        $btnPerfCapture.Width = $gbPerfCapture.Width - 20
 
         # -- More tab (Toolbox) --
         $lblToolboxInfo.Width = $innerWidth
@@ -717,6 +796,21 @@ function Start-EZfixInterface {
     }
     Add-EZfixLogLine "EZfix session started on $([System.Net.Dns]::GetHostName()). Session log: $sessionLogPath"
 
+    # A capture started in a previous session (or before EZfix was
+    # closed without clicking Stop) keeps running on its own - logman
+    # doesn't stop just because EZfix's process did. Catch that here so
+    # the button reflects reality instead of always starting collapsed
+    # to "Start."
+    try {
+        $existingCapture = Get-EZfixPerformanceCaptureStatus
+        if ($existingCapture.Running) {
+            $btnPerfCapture.Text = 'Stop Performance Capture'
+            $btnPerfCapture.BackColor = [System.Drawing.Color]::LightSalmon
+            Add-EZfixLogLine "A performance capture from a previous session is still running (started $($existingCapture.StartTime)) - use Stop Performance Capture in Evidence to collect it."
+        }
+    }
+    catch { }
+
     # ============================================================
     # SECTION 1 - events (all with -ShowPopup)
     # ============================================================
@@ -810,6 +904,27 @@ function Start-EZfixInterface {
             Start-EZfixCategoryScoping -Category $category -EvtxRoot $evtxRoot 6>&1
         } -ShowPopup
     })
+
+    $btnPerfCapture.Add_Click({
+        $status = Get-EZfixPerformanceCaptureStatus
+        if (-not $status.Running) {
+            try {
+                Start-EZfixPerformanceCapture 6>&1 | ForEach-Object { Add-EZfixLogLine $_ }
+                $btnPerfCapture.Text = 'Stop Performance Capture'
+                $btnPerfCapture.BackColor = [System.Drawing.Color]::LightSalmon
+            }
+            catch {
+                [System.Windows.Forms.MessageBox]::Show("Could not start the capture: $($_.Exception.Message)", 'EZfix', 'OK', 'Error') | Out-Null
+            }
+        }
+        else {
+            Invoke-EZfixAction -Label 'Performance + logs capture' -Action {
+                Stop-EZfixPerformanceCapture 6>&1
+            } -ShowPopup
+            $btnPerfCapture.Text = 'Start Performance Capture'
+            $btnPerfCapture.BackColor = $gbPerfCapture.BackColor
+        }
+    })
     function Open-EZfixSelectedVhd([string]$ImagePath) {
         if (-not $ImagePath) { return }
         if ($vhdState.Path) {
@@ -857,6 +972,11 @@ function Start-EZfixInterface {
     $form.Add_FormClosing({
         if ($vhdState.Path) {
             $answer=[Windows.Forms.MessageBox]::Show('A read-only VHD/VHDX is still attached. Close EZfix and leave it attached? Choose No to return and use Detach VHD.', 'EZfix', 'YesNo', 'Question')
+            if ($answer -ne 'Yes') { $_.Cancel=$true; return }
+        }
+        $captureStatus = Get-EZfixPerformanceCaptureStatus
+        if ($captureStatus.Running) {
+            $answer=[Windows.Forms.MessageBox]::Show("A performance capture is still running (started $($captureStatus.StartTime)). It will keep running in the background even after EZfix closes. Close anyway? Choose No to return and click Stop Performance Capture first.", 'EZfix', 'YesNo', 'Question')
             if ($answer -ne 'Yes') { $_.Cancel=$true }
         }
     })
@@ -1073,6 +1193,75 @@ function Start-EZfixInterface {
 
         Invoke-EZfixAction -Label "Offline analysis (${letter}:)" -Action {
             Start-EZfixOfflineAnalysis -DriveLetter $letter 6>&1
+        }
+    })
+
+    $btnLkgCheck.Add_Click({
+        $letter = $txtLetter.Text.Trim()
+        if ($letter -notmatch '^[A-Za-z]$') {
+            [System.Windows.Forms.MessageBox]::Show("Enter a single valid drive letter in the Drive field above (e.g. D).", "EZfix", 'OK', 'Warning') | Out-Null
+            return
+        }
+
+        # Same spirit as the disk state-change confirmation: one upfront
+        # dialog, then -Confirm:$false below so it isn't asked twice.
+        # Set-EZfixLastKnownGood itself only ever writes anything if
+        # Default and Last Known Good actually differ - running this
+        # when they already match is always a safe no-op.
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "This checks disk ${letter}:'s Last Known Good configuration and switches to it if different from Default. If they already match, nothing is changed. Continue?",
+            "Confirm Last Known Good check", 'YesNo', 'Warning'
+        )
+        if ($confirm -ne 'Yes') {
+            Add-EZfixLogLine "Last Known Good check canceled (not confirmed)."
+            return
+        }
+
+        Invoke-EZfixAction -Label "Last Known Good check (${letter}:)" -Action {
+            Set-EZfixLastKnownGood -DriveLetter $letter -Confirm:$false 6>&1
+        }
+    })
+
+    $btnListUpdates.Add_Click({
+        $letter = $txtLetter.Text.Trim()
+        if ($letter -notmatch '^[A-Za-z]$') {
+            [System.Windows.Forms.MessageBox]::Show("Enter a single valid drive letter in the Drive field above (e.g. D).", "EZfix", 'OK', 'Warning') | Out-Null
+            return
+        }
+
+        # Read-only - no confirmation needed, same as Run Offline Analysis.
+        Invoke-EZfixAction -Label "Installed updates (${letter}:)" -Action {
+            Get-EZfixOfflineUpdates -DriveLetter $letter 6>&1
+        }
+    })
+
+    $btnRemoveUpdate.Add_Click({
+        $letter = $txtLetter.Text.Trim()
+        if ($letter -notmatch '^[A-Za-z]$') {
+            [System.Windows.Forms.MessageBox]::Show("Enter a single valid drive letter in the Drive field above (e.g. D).", "EZfix", 'OK', 'Warning') | Out-Null
+            return
+        }
+        $packageName = $txtPackageName.Text.Trim()
+        if (-not $packageName) {
+            [System.Windows.Forms.MessageBox]::Show("Paste the exact PackageName from List Recent Updates first.", "EZfix", 'OK', 'Warning') | Out-Null
+            return
+        }
+
+        # This one gets a stronger warning than the others - it is the
+        # only irreversible-by-EZfix action in the whole app. Everything
+        # else here can be undone by re-running it the other way; the
+        # only way back from this is reinstalling the update.
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "This will PERMANENTLY remove this update from disk ${letter}: with no undo inside EZfix - the only way back is reinstalling it afterward:`n`n$packageName`n`nOnly continue if you are confident this specific update is the cause. Continue?",
+            "Confirm update removal", 'YesNo', 'Warning'
+        )
+        if ($confirm -ne 'Yes') {
+            Add-EZfixLogLine "Update removal canceled (not confirmed)."
+            return
+        }
+
+        Invoke-EZfixAction -Label "Remove update (${letter}: - $packageName)" -Action {
+            Remove-EZfixOfflineUpdate -DriveLetter $letter -PackageName $packageName -Confirm:$false 6>&1
         }
     })
 
