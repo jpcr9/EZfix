@@ -39,6 +39,16 @@ function Start-EZfixConnectivity {
         try { Write-Host "Secure Boot enabled: $(Confirm-SecureBootUEFI -ErrorAction Stop)" } catch { Write-Host "Secure Boot: unavailable or unsupported ($($_.Exception.Message))" }
         try { $tpm=Get-Tpm -ErrorAction Stop; Write-Host "TPM present: $($tpm.TpmPresent) | Ready: $($tpm.TpmReady) | Enabled: $($tpm.TpmEnabled)" } catch { Write-Host "TPM information unavailable: $($_.Exception.Message)" }
     }
+    Show-EZfixConnectivitySection 'BitLocker' {
+        $volumes=@(Get-BitLockerVolume -ErrorAction Stop)
+        if(-not $volumes){Write-Host 'No BitLocker-manageable volumes were returned.'; return}
+        foreach($volume in $volumes) {
+            $protectors=($volume.KeyProtector.KeyProtectorType -join ', ')
+            if(-not $protectors){$protectors='None'}
+            Write-Host "$($volume.MountPoint) | Protection: $($volume.ProtectionStatus) | Volume status: $($volume.VolumeStatus) | Encrypted: $($volume.EncryptionPercentage)% | Key protectors: $protectors"
+        }
+        Write-Host 'Protection Off does not mean the drive is unencrypted - a paused or suspended state also reports here.'
+    }
     Show-EZfixConnectivitySection 'Local TCP listeners (first 30 by port)' {
         $listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Sort-Object LocalPort,LocalAddress | Select-Object -First 30)
         foreach($listener in $listeners) {
@@ -53,5 +63,3 @@ function Start-EZfixConnectivity {
     }
     Write-Host '=== END OF CONNECTIVITY & SECURITY ==='
 }
-
-
