@@ -19,15 +19,45 @@
 
 function New-EZfixReportFolder {
     <#
-        Creates (if it doesn't exist) Desktop\EZfix\<timestamp>\ and
-        returns the path. Every run that needs to save evidence calls
-        this ONCE and uses the returned folder for all of that run's
-        files - so each run stays separate, without overwriting
-        previous runs.
+        Creates (if it doesn't exist) Desktop\EZfix\<timestamp>_<label>\
+        and returns the path. Every run that needs to save evidence
+        calls this once and uses the returned folder for all of that
+        run's files - so each run stays separate, without overwriting
+        previous runs, and the folder name itself says what produced it
+        instead of being a bare timestamp.
+
+        If a report folder was already created for the current action
+        (see $script:EZfixCurrentReportFolder, set by Invoke-EZfixAction
+        in EZfix-Interface.ps1 around the whole action), that same
+        folder is reused instead of creating a second one - this is what
+        keeps, for example, Offline Analysis's own detailed evidence
+        files in the same folder as the summary report the GUI already
+        created for that one click, rather than splitting one action's
+        output across two differently-timestamped folders. Calling this
+        directly from a console, outside the GUI, always creates a
+        fresh folder as before, since that script-scope hint is never
+        set there.
     #>
-    $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss_fff") + '_' + [guid]::NewGuid().ToString('N').Substring(0,8)
+    param(
+        [string]$Label
+    )
+
+    if ($script:EZfixCurrentReportFolder -and (Test-Path -LiteralPath $script:EZfixCurrentReportFolder)) {
+        return $script:EZfixCurrentReportFolder
+    }
+
+    $safeLabel = if ($Label) { '_' + ($Label -replace '[^A-Za-z0-9]+', '-').Trim('-') } else { '' }
+    $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss") + $safeLabel
     $basePath = Join-Path ([Environment]::GetFolderPath('Desktop')) "EZfix"
     $reportPath = Join-Path $basePath $timestamp
+
+    # Two actions finishing in the same second with the same label is
+    # rare but possible - only append a short random suffix if the
+    # plain name is already taken, so the common case stays as clean as
+    # the name alone.
+    if (Test-Path -LiteralPath $reportPath) {
+        $reportPath = $reportPath + '_' + [guid]::NewGuid().ToString('N').Substring(0,4)
+    }
 
     New-Item -Path $reportPath -ItemType Directory -Force | Out-Null
 
