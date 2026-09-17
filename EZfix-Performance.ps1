@@ -262,15 +262,30 @@ function Stop-EZfixPerformanceCapture {
     $stopResult = & logman stop $state.CollectorName 2>&1
     if ($LASTEXITCODE -ne 0) { Write-Host "WARNING: logman stop reported: $stopResult" -ForegroundColor Red }
 
+    # logman can append its own versioning suffix to the file name given
+    # at creation time (e.g. counters_000001.blg instead of
+    # counters.blg, depending on Windows version) - rather than assume
+    # the exact name, look for whatever .blg file actually landed in
+    # the capture folder.
+    $actualBlgFile = Get-ChildItem -LiteralPath $state.CaptureFolder -Filter '*.blg' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+
     $reportFolder = New-EZfixReportFolder
     $csvPath = Join-Path $reportFolder 'performance-capture.csv'
-    $relogResult = & relog $state.BlgPath -f CSV -o $csvPath -y 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Could not convert the counter log to CSV - $relogResult" -ForegroundColor Red
+
+    if (-not $actualBlgFile) {
+        Write-Host "Could not find a counter log file in $($state.CaptureFolder) - no performance-capture.csv will be produced this time." -ForegroundColor Red
     }
     else {
-        $minutes = [math]::Round(($endTime - $startTime).TotalMinutes, 1)
-        Write-Host "OK: performance counters saved to performance-capture.csv ($minutes minutes captured)" -ForegroundColor Green
+        $relogResult = & relog $actualBlgFile.FullName -f CSV -o $csvPath -y 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Could not convert the counter log to CSV - $relogResult" -ForegroundColor Red
+        }
+        else {
+            $minutes = [math]::Round(($endTime - $startTime).TotalMinutes, 1)
+            Write-Host "OK: performance counters saved to performance-capture.csv ($minutes minutes captured)" -ForegroundColor Green
+        }
     }
 
     & logman delete $state.CollectorName 2>&1 | Out-Null
@@ -300,4 +315,3 @@ function Stop-EZfixPerformanceCapture {
     Write-Host ""
     Write-Host "Report folder: $reportFolder" -ForegroundColor Cyan
 }
-
