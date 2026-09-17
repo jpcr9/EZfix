@@ -21,10 +21,10 @@ Looking for a previously tested version instead of the newest code? See [Release
 
 | Tool | Useful for |
 |---|---|
-| System Overview | Windows version, uptime, CPU, RAM, GPU, BIOS and drive capacity. |
+| System Overview | Windows version, uptime, CPU, RAM, GPU, BIOS, drive capacity and health, pending-restart status, and firmware mode/boot entries. |
 | Network | IP configuration, gateway, DNS and route checks; also clears DNS cache. |
 | Performance | CPU/RAM, disk capacity/activity, process CPU time and RAM ranking, page file use. |
-| Connectivity & Security | Network profiles, firewall, Defender, Secure Boot, TPM, listeners and RDP. |
+| Connectivity & Security | Network profiles, firewall, Defender, Secure Boot, TPM, BitLocker, listeners and RDP. |
 | Recent Errors | Up to 50 newest System/Application Critical/Error events over 24 hours. |
 | Cleanup | Confirmed removal of eligible temporary files older than seven days and emptying the Recycle Bin. |
 
@@ -42,9 +42,11 @@ Find VHD/VHDX files across accessible local drives or select a file. Open one im
 
 Offline analysis reads supported Windows version, registry, event logs and boot configuration from a secondary Windows disk, once it is brought Online with a drive letter here.
 
-**Evidence** - category-based exports (Network, Auth, App, OS, Other) for investigation outside EZfix, for either this PC or a secondary disk mounted in Disk Investigation.
+Recovery Actions - the only actions that can modify a secondary disk rather than just read it. Check / Restore Last Known Good compares the disk's Default and Last Known Good ControlSet and offers to switch, only if they differ. List Recent Updates and Remove show installed update packages and allow removing one by its exact name - useful when a specific update is suspected of causing a boot or startup problem. Removal has no undo inside EZfix; the only way back is reinstalling the update.
 
-**More** - a quick-reference toolbox of handy tools by category (Network is the only category built out today): what each tool is for, easy setup, a couple of commands to try, and a link to its own official docs for anything deeper.
+**Evidence** - category-based exports (Network, Auth, App, OS, Other) for investigation outside EZfix, for either this PC or a secondary disk mounted in Disk Investigation. Also includes an open-ended Performance + Logs Capture: start it, reproduce a problem, then stop it to get CPU/memory/disk samples correlated with any errors logged during that same window.
+
+**More** - a quick-reference toolbox of handy tools by category (Network, Auth, App, OS, Other): what each tool is for, easy setup, a couple of commands to try, and a link to its own official docs for anything deeper.
 
 ## Requirements and behavior
 
