@@ -1,20 +1,20 @@
 <#
     EZfix-Performance.ps1
-    Modulo de rendimiento de EZfix (modo TS - rapido, no persiste nada).
+    EZfix's performance module (TS mode - fast, nothing persisted).
 
-    Alcance a proposito, nada mas: CPU, memoria, disco, y los 5 procesos
-    que mas consumen. No hace historial, no alarmas configurables, no
-    umbrales ajustables. Si esto no alcanza para explicar el problema,
-    el paso siguiente es Scoping (guardar evidencia para investigar mas
-    a fondo) - no hacer este modulo mas grande.
+    Deliberately scoped to just this: CPU, memory, disk, and the top 5
+    processes by consumption. No history, no configurable alarms, no
+    adjustable thresholds. If this isn't enough to explain the problem,
+    the next step is Scoping (save evidence to investigate further) -
+    not making this module bigger.
 #>
 
-# Compat: $IsWindows/$IsLinux son variables automaticas de pwsh (PowerShell 7+).
-# En Windows PowerShell 5.1 (lo que hay instalado en esta maquina todavia,
-# ver Network-Diagnostics.ps1) esas variables no existen - si no estan
-# definidas, las armamos nosotros mismos aca. Asi este modulo corre igual
-# sin necesidad de instalar pwsh primero, y de paso el mismo truco
-# resuelve el pendiente que tenia Network-Diagnostics.ps1.
+# Compat: $IsWindows/$IsLinux are automatic variables in pwsh (PowerShell 7+).
+# On Windows PowerShell 5.1 (still installed on this machine, see
+# Network-Diagnostics.ps1) those variables don't exist - if they're not
+# defined, we set them ourselves here. That way this module runs the
+# same without needing pwsh installed first, and the same trick also
+# closes the open item Network-Diagnostics.ps1 had.
 if (-not (Test-Path Variable:IsWindows)) {
     $IsWindows = $env:OS -eq 'Windows_NT'
     $IsLinux   = -not $IsWindows
@@ -29,11 +29,12 @@ function Start-EZfixPerformance {
     Write-Host "Date:  $(Get-Date)"
     Write-Host ""
 
-    # 1. CPU. Windows tiene un "% de uso ahora mismo" directo (LoadPercentage).
-    # Linux no mide CPU igual - el estandar ahi es el load average (cuantos
-    # procesos en promedio estan esperando CPU en el ultimo minuto). No son
-    # el mismo numero ni se pueden comparar 1 a 1, pero los dos responden
-    # la misma pregunta de fondo: "esta la CPU saturada ahora mismo?".
+    # 1. CPU. Windows has a direct "% usage right now" (LoadPercentage).
+    # Linux doesn't measure CPU the same way - the standard there is
+    # load average (how many processes on average were waiting for CPU
+    # over the last minute). They're not the same number and can't be
+    # compared 1-to-1, but both answer the same underlying question:
+    # "is the CPU saturated right now?".
     Write-Host "--- 1. CPU ---" -ForegroundColor Yellow
 
     if ($IsWindows) {
@@ -54,9 +55,10 @@ function Start-EZfixPerformance {
     }
     Write-Host ""
 
-    # 2. Memoria - aca si el concepto es identico en los dos sistemas
-    # (cuanta memoria total hay, cuanta esta libre), solo cambia de donde
-    # se lee el dato: WMI/CIM en Windows, /proc/meminfo en Linux.
+    # 2. Memory - here the concept is identical on both systems (how
+    # much total memory there is, how much is free), only where the
+    # data is read from changes: WMI/CIM on Windows, /proc/meminfo on
+    # Linux.
     Write-Host "--- 2. Memory ---" -ForegroundColor Yellow
 
     if ($IsWindows) {
@@ -80,9 +82,9 @@ function Start-EZfixPerformance {
     }
     Write-Host ""
 
-    # 3. Disco. Get-PSDrive es nativo de PowerShell y corre igual en Windows
-    # y Linux (letras de unidad vs. puntos de montaje) - no hace falta
-    # branch por sistema operativo aca.
+    # 3. Disk. Get-PSDrive is native to PowerShell and runs the same on
+    # Windows and Linux (drive letters vs. mount points) - no OS branch
+    # needed here.
     Write-Host "--- 3. Disk ---" -ForegroundColor Yellow
 
     Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -gt 0 } | ForEach-Object {
@@ -95,11 +97,11 @@ function Start-EZfixPerformance {
     }
     Write-Host ""
 
-    # 4. Top 5 procesos por CPU. Get-Process tambien es nativo y cross-platform -
-    # otra vez, no hace falta branch. Se imprime con Write-Host en vez de
-    # Format-Table porque Format-Table depende de como cada terminal maneja
-    # el formato de salida - Write-Host con texto armado a mano es mas
-    # confiable y se ve igual en cualquier lado.
+    # 4. Top 5 processes by CPU. Get-Process is also native and
+    # cross-platform - again, no branch needed. Printed with Write-Host
+    # instead of Format-Table because Format-Table depends on how each
+    # terminal handles output formatting - hand-built text via
+    # Write-Host is more reliable and looks the same everywhere.
     Write-Host "--- 4. Top 5 processes (cumulative CPU time) ---" -ForegroundColor Yellow
 
     $topProcesses = Get-Process |
@@ -141,7 +143,7 @@ function Start-EZfixPerformance {
 }
 
 <#
-    USO:
+    USAGE:
         . .\EZfix-Performance.ps1
         Start-EZfixPerformance
 #>
