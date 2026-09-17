@@ -1,3 +1,25 @@
+# v1.0.2
+
+- Added BitLocker status and physical disk health (SMART/reliability) checks.
+- Added a pending-restart check, firmware mode, and read-only firmware boot entries to System Overview.
+- Added Last Known Good Configuration check and restore for an offline disk, in Disk Investigation.
+- Added listing and removal of installed updates on an offline disk, for troubleshooting a KB-caused issue.
+- Added an open-ended Performance + Logs Capture (Evidence tab), correlating CPU/memory/disk samples with logs from the same time window.
+- Report folders are now named after the action that created them, instead of a bare timestamp.
+- Fixed several scroll-position and duplicate-folder issues around Disk Investigation.
+  
+
+# v1.0.2
+
+- Added BitLocker status and physical disk health (SMART/reliability) checks.
+- Added a pending-restart check, firmware mode, and read-only firmware boot entries to System Overview.
+- Added Last Known Good Configuration check and restore for an offline disk, in Disk Investigation.
+- Added listing and removal of installed updates on an offline disk, for troubleshooting a KB-caused issue.
+- Added an open-ended Performance + Logs Capture (Evidence tab), correlating CPU/memory/disk samples with logs from the same time window.
+- Report folders are now named after the action that created them, instead of a bare timestamp.
+- Fixed several scroll-position and duplicate-folder issues around Disk Investigation.
+
+
 # v1.0.1
 
 - Added Auth, App, OS and Other categories to the Toolbox, alongside the existing Network cards.
