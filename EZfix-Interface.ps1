@@ -757,12 +757,24 @@ function Start-EZfixInterface {
     function Invoke-EZfixAction {
         param([Parameter(Mandatory)][string]$Label,[Parameter(Mandatory)][scriptblock]$Action,[switch]$ShowPopup)
         Add-EZfixLogLine "=== $Label ==="
+        Add-EZfixLogLine "Running... this can take a few seconds."
+        [System.Windows.Forms.Application]::DoEvents()
         $hadError=$false; $hadWarning=$false; $writer=$null; $shown=0; $lines=0
         $reportPath=$null
         [Windows.Forms.Cursor]::Current=[Windows.Forms.Cursors]::WaitCursor
         try {
             $safeLabel = ($Label -replace '[^A-Za-z0-9]+','-').Trim('-')
-            $reportPath=Join-Path (New-EZfixReportFolder) ("{0}_{1}.txt" -f $safeLabel,(Get-Date -Format 'HHmmss_fff'))
+            # One report folder per action, named after the action
+            # itself instead of a bare timestamp - stashed in
+            # $script:EZfixCurrentReportFolder (read by
+            # New-EZfixReportFolder in EZfix-Common.ps1) so a module that
+            # calls New-EZfixReportFolder a second time inside this same
+            # action - Offline Analysis, for its own detailed evidence
+            # files - reuses this one folder instead of creating a
+            # second, differently-timestamped one for the same click.
+            $reportFolder = New-EZfixReportFolder -Label $safeLabel
+            $script:EZfixCurrentReportFolder = $reportFolder
+            $reportPath=Join-Path $reportFolder ("{0}_{1}.txt" -f $safeLabel,(Get-Date -Format 'HHmmss_fff'))
             $writer=[IO.StreamWriter]::new($reportPath,$false,[Text.UTF8Encoding]::new($false))
             $writer.AutoFlush=$true
             $writer.WriteLine("EZfix | $Label | $(Get-Date -Format o) | $env:COMPUTERNAME")
@@ -783,6 +795,7 @@ function Start-EZfixInterface {
             Add-EZfixLogLine ("ERROR: " + $_.Exception.Message)
         } finally {
             if ($writer) { $writer.Dispose(); $reportState.Path=$reportPath; $btnReport.Enabled=$true }
+            $script:EZfixCurrentReportFolder = $null
             [Windows.Forms.Cursor]::Current=[Windows.Forms.Cursors]::Default
         }
         if ($lines -gt $shown) { Add-EZfixLogLine "Showing $shown of $lines lines. Full details are in the report." }
@@ -1248,12 +1261,18 @@ function Start-EZfixInterface {
         )
         if ($confirm -ne 'Yes') {
             Add-EZfixLogLine "Last Known Good switch canceled (not confirmed)."
-            return
+        }
+        else {
+            Invoke-EZfixAction -Label "Last Known Good switch (${letter}:)" -Action {
+                Set-EZfixLastKnownGoodDefault -DriveLetter $letter -Confirm:$false 6>&1
+            } -ShowPopup
         }
 
-        Invoke-EZfixAction -Label "Last Known Good switch (${letter}:)" -Action {
-            Set-EZfixLastKnownGoodDefault -DriveLetter $letter -Confirm:$false 6>&1
-        } -ShowPopup
+        # Same MessageBox-over-a-scrolled-tab fix as Apply State Change:
+        # this dialog was just shown on this tab either way (confirmed
+        # or canceled), which reliably corrupts its scroll state on close.
+        Update-EZfixLayout -AdvancedExpanded:$false
+        Update-EZfixLayout -AdvancedExpanded:$true
     })
 
     $btnListUpdates.Add_Click({
@@ -1291,12 +1310,17 @@ function Start-EZfixInterface {
         )
         if ($confirm -ne 'Yes') {
             Add-EZfixLogLine "Update removal canceled (not confirmed)."
-            return
+        }
+        else {
+            Invoke-EZfixAction -Label "Remove update (${letter}: - $packageName)" -Action {
+                Remove-EZfixOfflineUpdate -DriveLetter $letter -PackageName $packageName -Confirm:$false 6>&1
+            }
         }
 
-        Invoke-EZfixAction -Label "Remove update (${letter}: - $packageName)" -Action {
-            Remove-EZfixOfflineUpdate -DriveLetter $letter -PackageName $packageName -Confirm:$false 6>&1
-        }
+        # Same MessageBox-over-a-scrolled-tab fix as Apply State Change
+        # and the Last Known Good switch.
+        Update-EZfixLayout -AdvancedExpanded:$false
+        Update-EZfixLayout -AdvancedExpanded:$true
     })
 
     $form.Add_Resize({ Resize-EZfixAdvancedPanel })
